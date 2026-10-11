@@ -1,0 +1,131 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+          lower-case-service-id: true
+
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders:
+              - Authorization
+              - Content-Type
+              - "*"
+            exposedHeaders:
+              - Authorization
+
+      routes:
+        # =====================================================================
+        # User Profile Service Routes
+        # =====================================================================
+        - id: user-profile-service
+          uri: lb://USER-PROFILE-SERVICE
+          predicates:
+            - Path=/api/users/**
+
+        # =====================================================================
+        # Food Database Service Routes
+        # =====================================================================
+        - id: food-database-service
+          uri: lb://FOOD-DATABASE-SERVICE
+          predicates:
+            - Path=/api/foods/**
+
+        # =====================================================================
+        # Meal Planning Service Routes
+        # Supports both actual (/api/meal-plans/**) and conceptual (/api/meals/**)
+        # =====================================================================
+        - id: meal-planning-direct
+          uri: lb://MEAL-PLANNING-SERVICE
+          predicates:
+            - Path=/api/meal-plans/**
+
+        - id: meal-planning-alias
+          uri: lb://MEAL-PLANNING-SERVICE
+          predicates:
+            - Path=/api/meals/**
+          filters:
+            - RewritePath=/api/meals(?<segment>/?.*), /api/meal-plans$\{segment}
+
+        # =====================================================================
+        # Grocery Planning Service Routes
+        # Supports both actual (/api/grocery-lists/**) and conceptual (/api/grocery/**)
+        # =====================================================================
+        - id: grocery-planning-direct
+          uri: lb://GROCERY-PLANNING-SERVICE
+          predicates:
+            - Path=/api/grocery-lists/**
+
+        - id: grocery-planning-alias
+          uri: lb://GROCERY-PLANNING-SERVICE
+          predicates:
+            - Path=/api/grocery/**
+          filters:
+            - RewritePath=/api/grocery(?<segment>/?.*), /api/grocery-lists$\{segment}
+
+        # =====================================================================
+        # Swagger / OpenAPI Aggregation Routes
+        # =====================================================================
+        - id: user-profile-docs
+          uri: lb://USER-PROFILE-SERVICE
+          predicates:
+            - Path=/v3/api-docs/user-profile
+          filters:
+            - SetPath=/v3/api-docs
+
+        - id: food-database-docs
+          uri: lb://FOOD-DATABASE-SERVICE
+          predicates:
+            - Path=/v3/api-docs/food-database
+          filters:
+            - SetPath=/v3/api-docs
+
+        - id: meal-planning-docs
+          uri: lb://MEAL-PLANNING-SERVICE
+          predicates:
+            - Path=/v3/api-docs/meal-planning
+          filters:
+            - SetPath=/v3/api-docs
+
+        - id: grocery-planning-docs
+          uri: lb://GROCERY-PLANNING-SERVICE
+          predicates:
+            - Path=/v3/api-docs/grocery-planning
+          filters:
+            - SetPath=/v3/api-docs
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    urls:
+      - name: 1. User Profile Service
+        url: /v3/api-docs/user-profile
+      - name: 2. Food Database Service
+        url: /v3/api-docs/food-database
+      - name: 3. Meal Planning Service
+        url: /v3/api-docs/meal-planning
+      - name: 4. Grocery Planning Service
+        url: /v3/api-docs/grocery-planning

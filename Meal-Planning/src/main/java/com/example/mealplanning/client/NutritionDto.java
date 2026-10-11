@@ -1,5 +1,6 @@
 package com.example.mealplanning.client;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,6 +18,7 @@ public class NutritionDto {
 
     private Double protein;
 
+    @JsonAlias({"carbs", "carbohydrates"})
     private Double carbohydrates;
 
     private Double fat;

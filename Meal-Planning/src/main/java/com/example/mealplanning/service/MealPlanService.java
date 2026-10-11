@@ -142,10 +142,10 @@ public class MealPlanService {
                 // Scale them to the actual quantity stored in the meal.
                 double factor = meal.getQuantity() / 100.0;
 
-                totalCalories    += food.getNutrition().getCalories()       * factor;
-                totalProtein     += food.getNutrition().getProtein()         * factor;
-                totalCarbs       += food.getNutrition().getCarbohydrates()   * factor;
-                totalFat         += food.getNutrition().getFat()             * factor;
+                totalCalories    += (food.getNutrition().getCalories() != null ? food.getNutrition().getCalories() : 0.0)       * factor;
+                totalProtein     += (food.getNutrition().getProtein() != null ? food.getNutrition().getProtein() : 0.0)         * factor;
+                totalCarbs       += (food.getNutrition().getCarbohydrates() != null ? food.getNutrition().getCarbohydrates() : 0.0)   * factor;
+                totalFat         += (food.getNutrition().getFat() != null ? food.getNutrition().getFat() : 0.0)             * factor;
             }
         }
 

@@ -5,13 +5,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
 /**
- * OpenFeign client for communicating with the Food Database Service.
+ * OpenFeign client for communicating with the Food Database Service using Eureka service discovery.
  *
- * <p>Base URL is configured via the "food-service.url" property in application.yml.
- * This client fetches minimal food information (id, name, category) when a
+ * <p>This client fetches minimal food information (id, name, category) when a
  * grocery item is added. Nutrition data is intentionally not imported.
  */
-@FeignClient(name = "food-service", url = "${food-service.url}")
+@FeignClient(name = "food-database-service")
 public interface FoodServiceClient {
 
     /**

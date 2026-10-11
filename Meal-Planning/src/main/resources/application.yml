@@ -1,6 +1,6 @@
 spring:
   application:
-    name: meal-planning
+    name: meal-planning-service
   data:
     mongodb:
       uri: 
@@ -9,5 +9,13 @@ spring:
 server:
   port: 3001
 
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
 food-service:
   url: http://localhost:3000
+
