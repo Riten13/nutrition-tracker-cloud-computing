@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    
+    /* Warm off-white theme */
+    --background: 45 20% 98%;
+    --foreground: 150 20% 12%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 150 20% 12%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 20% 12%;
+    
+    /* Forest green primary */
+    --primary: 152 42% 18%;
+    --primary-foreground: 84 80% 95%;
+    
+    /* Soft lime green accent */
+    --secondary: 84 65% 42%;
+    --secondary-foreground: 0 0% 100%;
+    
+    --muted: 45 10% 92%;
+    --muted-foreground: 150 8% 40%;
+    
+    --accent: 84 60% 92%;
+    --accent-foreground: 152 42% 16%;
+    
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 45 10% 88%;
+    --input: 45 10% 88%;
+    --ring: 152 42% 18%;
+    
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Dark forest charcoal */
+    --background: 150 18% 7%;
+    --foreground: 45 20% 95%;
+    
+    --card: 150 16% 10%;
+    --card-foreground: 45 20% 95%;
+    
+    --popover: 150 16% 10%;
+    --popover-foreground: 45 20% 95%;
+    
+    --primary: 142 55% 45%;
+    --primary-foreground: 150 20% 8%;
+    
+    --secondary: 84 55% 45%;
+    --secondary-foreground: 150 20% 8%;
+    
+    --muted: 150 12% 16%;
+    --muted-foreground: 150 10% 65%;
+    
+    --accent: 150 14% 18%;
+    --accent-foreground: 84 70% 60%;
+    
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 150 12% 18%;
+    --input: 150 12% 18%;
+    --ring: 142 55% 45%;
+  }
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  min-height: 100vh;
+}
+
+/* Custom scrollbars that are clean and restrained */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 105, 0.25);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 105, 0.45);
+}

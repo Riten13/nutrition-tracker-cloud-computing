@@ -138,6 +138,10 @@ mvn spring-boot:run
 # 6. Grocery Planning Service (Port 3002)
 cd Grocery-Planning
 mvn spring-boot:run
+
+# 7. Frontend Client (Port 5173)
+cd frontend
+npm run dev
 ```
 
 ---
@@ -198,6 +202,10 @@ MSA/
 ├── Grocery-Planning/    ← Microservice 4: Grocery Lists + Cost Estimation (MongoDB + Feign, Port 3002)
 │   ├── src/
 │   ├── pom.xml
+│   └── README.md
+├── frontend/            ← React 18 + Vite + TypeScript Web Client (Port 5173)
+│   ├── src/
+│   ├── package.json
 │   └── README.md
 └── README.md            ← Root Documentation
 ```
