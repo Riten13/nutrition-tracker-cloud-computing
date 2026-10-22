@@ -12,7 +12,7 @@ A complete **Nutrition Tracking Platform** built as a suite of independently dep
 |---|---------|------|------------------|----------|---------------|
 | 1 | [Eureka Server](./Eureka-Server/) | `8761` | `EUREKA-SERVER` | — | Service Discovery Registry |
 | 2 | [API Gateway](./API-Gateway/) | `8088` | `API-GATEWAY` | — | Spring Cloud Gateway (Eureka Client, CORS, Unified Swagger) |
-| 3 | [User Profile Service](./User-Profile/) | `8080` | `USER-PROFILE-SERVICE` | MySQL | JWT Auth (Eureka Client) |
+| 3 | [User Profile Service](./User-Profile/) | `8080` | `USER-PROFILE-SERVICE` | MongoDB Atlas | JWT Auth (Eureka Client) |
 | 4 | [Food Database Service](./Food-Database/) | `3000` | `FOOD-DATABASE-SERVICE` | MongoDB Atlas | Master Data (Eureka Client) |
 | 5 | [Meal Planning Service](./Meal-Planning/) | `3001` | `MEAL-PLANNING-SERVICE` | MongoDB Atlas | OpenFeign → Food DB via Eureka |
 | 6 | [Grocery Planning Service](./Grocery-Planning/) | `3002` | `GROCERY-PLANNING-SERVICE` | MongoDB Atlas | OpenFeign → Food DB via Eureka |
@@ -38,6 +38,7 @@ A complete **Nutrition Tracking Platform** built as a suite of independently dep
                                 ┌───────────────────────┐
                                 │     Eureka Server     │
                                 │      (Port 8761)      │
+                                │  (Service Discovery)  │
                                 └───────────┬───────────┘
                                             │
                ┌────────────────────────────┼───────────────────────────┐
@@ -46,7 +47,7 @@ A complete **Nutrition Tracking Platform** built as a suite of independently dep
     ┌─────────────────────┐      ┌─────────────────────┐     ┌─────────────────────┐
     │ User Profile Service│      │Food Database Service│     │Meal Planning Service│
     │     (Port 8080)     │      │     (Port 3000)     │     │     (Port 3001)     │
-    │       [MySQL]       │      │      [MongoDB]      │     │      [MongoDB]      │
+    │      [MongoDB]      │      │      [MongoDB]      │     │      [MongoDB]      │
     └─────────────────────┘      └──────────▲──────────┘     └──────────▲──────────┘
                                             │ Feign (Eureka)            │
                                             ├───────────────────────────┘
@@ -71,12 +72,10 @@ A complete **Nutrition Tracking Platform** built as a suite of independently dep
 | Spring Cloud Gateway | Reactive API Gateway (reverse proxy, routing, CORS) |
 | Spring Cloud LoadBalancer | Client-side load balancing for Gateway (`lb://`) & OpenFeign |
 | Spring Cloud OpenFeign | Inter-service REST communication using Eureka service discovery |
-| Spring Data JPA / Hibernate | ORM for User Profile (MySQL) |
-| Spring Data MongoDB | NoSQL data access for Food, Meal & Grocery services |
+| Spring Data MongoDB | Unified NoSQL data access for User, Food, Meal & Grocery services |
 | Spring Security + JWT (JJWT 0.12.6) | Authentication & Authorization |
 | Springdoc OpenAPI 3 (Swagger UI) | Interactive API documentation (Direct & Aggregated) |
-| MySQL | Relational DB for user profiles |
-| MongoDB Atlas | Cloud NoSQL for food, meal & grocery data |
+| MongoDB Atlas | Cloud NoSQL database across all 4 microservices |
 | Lombok | Boilerplate reduction |
 | Maven | Build & dependency management |
 
@@ -99,7 +98,62 @@ All client requests should be routed through the API Gateway on port **`8088`**:
 
 ---
 
-## 🚀 Running All Services Locally
+## 🐳 Running with Docker Compose (Recommended)
+
+Run the entire microservice stack (Eureka, Gateway, 4 Microservices, MySQL, MongoDB, and React Frontend) with a single command!
+
+### 1. Configure Environment (Optional)
+A default `.env` file is pre-configured with ready-to-run settings (MongoDB Atlas URI, MySQL credentials, and Gateway routing). You can customize it or review options in [`.env.example`](./.env.example):
+```bash
+cp .env.example .env
+```
+
+### 2. Build and Start All Containers
+```bash
+docker compose up --build
+```
+> Or run in detached (background) mode:
+> ```bash
+> docker compose up -d
+> ```
+
+### 3. Check Container Health & Status
+```bash
+docker compose ps
+```
+
+To view live logs from any service:
+```bash
+docker compose logs -f [service-name]
+# Example: docker compose logs -f api-gateway
+```
+
+### 4. Stop All Services
+```bash
+docker compose down
+```
+> To also wipe persistent database volumes (reset MySQL and local MongoDB):
+> ```bash
+> docker compose down -v
+> ```
+
+### 🌐 Container Access Points
+
+| Service | URL / Host Port | Description |
+|---------|-----------------|-------------|
+| **Frontend Web Client** | [http://localhost:5173](http://localhost:5173) | React 19 + Vite + Tailwind dashboard |
+| **API Gateway** | [http://localhost:8088](http://localhost:8088) | Central reverse proxy & routing |
+| **Unified Swagger UI** | [http://localhost:8088/swagger-ui.html](http://localhost:8088/swagger-ui.html) | Aggregated OpenAPI docs for all microservices |
+| **Eureka Dashboard** | [http://localhost:8761](http://localhost:8761) | Netflix Eureka service discovery console |
+| **User Profile Service** | [http://localhost:8080](http://localhost:8080) | Auth & User Profile microservice (MongoDB) |
+| **Food Database Service** | [http://localhost:3000](http://localhost:3000) | Food & Nutrition master data (MongoDB) |
+| **Meal Planning Service** | [http://localhost:3001](http://localhost:3001) | Meal plans & daily nutrition (MongoDB) |
+| **Grocery Planning Service** | [http://localhost:3002](http://localhost:3002) | Grocery lists & cost estimation (MongoDB) |
+| **MongoDB (Optional Local)** | `localhost:27017` | Local containerized MongoDB instance |
+
+---
+
+## 🚀 Running All Services Locally (Without Docker)
 
 ### Prerequisites
 
@@ -107,8 +161,7 @@ All client requests should be routed through the API Gateway on port **`8088`**:
 |-------------|-------|
 | Java 21 | `java -version` should show 21 |
 | Maven 3.9+ | `mvn -version` |
-| MySQL 8.x | Running on port `3306`, user `root`, password `1234` |
-| MongoDB | Atlas URI already configured in each service's `application.yml` |
+| MongoDB | Atlas URI configured in each service's `application.yml` (or local Mongo) |
 
 ### Start Order
 

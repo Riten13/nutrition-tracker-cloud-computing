@@ -14,6 +14,10 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class NutritionDto {
 
+    private Double servingSize;
+    private String servingUnit;
+    private Double servingWeightGrams;
+
     private Double calories;
 
     private Double protein;

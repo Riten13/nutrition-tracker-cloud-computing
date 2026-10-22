@@ -5,6 +5,7 @@ import com.example.groceryplanningservice.entity.GroceryListStatus;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -14,11 +15,17 @@ import java.util.Optional;
 public interface GroceryListRepository extends MongoRepository<GroceryList, String> {
 
     /**
-     * Find the active grocery list for a given user.
-     *
-     * @param userId the user ID
-     * @param status the list status (ACTIVE)
-     * @return the matching grocery list, if present
+     * Find the most recent active grocery list for a given user.
      */
-    Optional<GroceryList> findByUserIdAndStatus(Long userId, GroceryListStatus status);
+    Optional<GroceryList> findFirstByUserIdAndStatusOrderByCreatedAtDesc(Long userId, GroceryListStatus status);
+
+    /**
+     * Find all active grocery lists for a user, ordered by creation time descending.
+     */
+    List<GroceryList> findAllByUserIdAndStatusOrderByCreatedAtDesc(Long userId, GroceryListStatus status);
+
+    /**
+     * Find all grocery lists for a user.
+     */
+    List<GroceryList> findAllByUserIdOrderByCreatedAtDesc(Long userId);
 }

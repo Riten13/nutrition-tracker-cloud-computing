@@ -18,4 +18,5 @@ public class UserProfileResponse {
     private ProfileDto profile;
     private List<AllergyDto> allergies;
     private DietaryPreferenceDto dietaryPreference;
+    private NutritionGoalDto nutritionGoal;
 }

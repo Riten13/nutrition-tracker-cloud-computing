@@ -87,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener('auth-unauthorized', handleUnauthorized);
   }, []);
 
-  const login = async (credentials: LoginRequest, allowDemoFallback = true) => {
+  const login = async (credentials: LoginRequest) => {
     setIsLoading(true);
     try {
       const response: AuthResponse = await authService.login(credentials);
@@ -99,11 +99,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('nutrition_user', JSON.stringify(response.user));
       localStorage.removeItem('nutrition_demo_mode');
     } catch (err: any) {
-      // If backend is not running and user allows demo mode
-      if (allowDemoFallback && (!err.response || err.code === 'ERR_NETWORK')) {
-        console.warn('Backend unavailable at port 8088. Falling back to Demo Mode.');
-        enableDemoMode();
-        return;
+      if (!err.response || err.code === 'ERR_NETWORK') {
+        setIsBackendConnected(false);
       }
       throw err;
     } finally {
@@ -111,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const register = async (payload: RegisterRequest, allowDemoFallback = true) => {
+  const register = async (payload: RegisterRequest) => {
     setIsLoading(true);
     try {
       const response: AuthResponse = await authService.register(payload);
@@ -123,34 +120,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('nutrition_user', JSON.stringify(response.user));
       localStorage.removeItem('nutrition_demo_mode');
     } catch (err: any) {
-      if (allowDemoFallback && (!err.response || err.code === 'ERR_NETWORK')) {
-        console.warn('Backend unavailable at port 8088. Initializing registered user in Demo Mode.');
-        const newUser: UserProfileResponse = {
-          id: 1,
-          name: payload.name,
-          email: payload.email,
-          profile: {
-            age: payload.age,
-            weight: payload.weight,
-            height: payload.height,
-            activityLevel: payload.activityLevel || 'Active',
-          },
-          dietaryPreference: {
-            vegan: payload.vegan ?? false,
-            vegetarian: payload.vegetarian ?? false,
-            keto: payload.keto ?? false,
-            glutenFree: payload.glutenFree ?? false,
-            dairyFree: payload.dairyFree ?? false,
-          },
-          allergies: (payload.allergies || []).map((name, i) => ({ id: i + 1, name })),
-        };
-        setUser(newUser);
-        setToken('demo_token_jwt');
-        setIsDemoMode(true);
-        localStorage.setItem('nutrition_token', 'demo_token_jwt');
-        localStorage.setItem('nutrition_user', JSON.stringify(newUser));
-        localStorage.setItem('nutrition_demo_mode', 'true');
-        return;
+      if (!err.response || err.code === 'ERR_NETWORK') {
+        setIsBackendConnected(false);
       }
       throw err;
     } finally {

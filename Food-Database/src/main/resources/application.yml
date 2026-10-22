@@ -3,19 +3,22 @@ spring:
     name: food-database-service
   data:
     mongodb:
-      uri: 
+      uri: ${SPRING_DATA_MONGODB_URI:mongodb+srv://chatgpt2:riten13@cluster0.ioo4yf3.mongodb.net/food_database?appName=Cluster0}
 
 server:
   port: 3000
 
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+
 eureka:
   client:
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: ${EUREKA_SERVER_URL:http://localhost:8761/eureka/}
   instance:
     prefer-ip-address: true
 
 logging:
   level:
     com.example.fooddatabase: DEBUG
-

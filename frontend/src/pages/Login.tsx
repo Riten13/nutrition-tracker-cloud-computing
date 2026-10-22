@@ -135,7 +135,7 @@ export const Login: React.FC = () => {
               onClick={handleDemoLogin}
               leftIcon={<ShieldCheck className="w-4 h-4 text-[#84cc16]" />}
             >
-              Explore with Demo Account (Backend Offline Fallback)
+              Explore in Demo Mode (Simulated Data)
             </Button>
           </div>
 

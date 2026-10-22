@@ -5,5 +5,6 @@ package com.example.groceryplanningservice.entity;
  */
 public enum GroceryListStatus {
     ACTIVE,
-    COMPLETED
+    COMPLETED,
+    ARCHIVED
 }

@@ -22,6 +22,9 @@ public class NutritionDto {
     @Schema(description = "Unit of the serving size", example = "g")
     private String servingUnit;
 
+    @Schema(description = "Weight in grams for this serving (e.g. 1 piece roti = 35g, 1 cup rice = 150g)", example = "100.0")
+    private Double servingWeightGrams;
+
     @Schema(description = "Calories per serving", example = "165")
     private double calories;
 

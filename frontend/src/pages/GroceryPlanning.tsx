@@ -63,13 +63,17 @@ export const GroceryPlanning: React.FC = () => {
 
     try {
       // 1. Fetch foods for item names
-      let foodsList = mockFoods;
+      let foodsList: FoodResponse[] = [];
       try {
         foodsList = isDemoMode
           ? mockFoods
           : await foodService.getFoods();
-      } catch {
-        foodsList = mockFoods;
+      } catch (foodsErr) {
+        if (isDemoMode) {
+          foodsList = mockFoods;
+        } else {
+          console.error('Failed to load foods list from Food Database Service:', foodsErr);
+        }
       }
       setAvailableFoods(foodsList);
       const map: Record<string, FoodResponse> = {};
@@ -109,8 +113,14 @@ export const GroceryPlanning: React.FC = () => {
             setGroceryList(null);
             setEstimatedCost(0);
           } else {
-            setGroceryList(mockGroceryList);
-            setEstimatedCost(1350);
+            console.error('Failed to load active grocery list:', listErr);
+            setGroceryList(null);
+            setEstimatedCost(0);
+            setActionError(
+              listErr.response?.data?.message ||
+              listErr.message ||
+              'Could not load active grocery list from Grocery Planning Service. Please verify service is running.'
+            );
           }
         }
       }
@@ -317,6 +327,12 @@ export const GroceryPlanning: React.FC = () => {
           </Button>
         )}
       </div>
+
+      {isDemoMode && (
+        <div className="text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 p-3 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center justify-between">
+          <span>⚠️ <strong>Demo Mode Active:</strong> Displaying simulated grocery data. List modifications will not be saved to the Grocery Planning microservice.</span>
+        </div>
+      )}
 
       {actionSuccess && (
         <Alert type="success" onClose={() => setActionSuccess(null)}>

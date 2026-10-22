@@ -17,6 +17,7 @@ public class Nutrition {
 
     private double servingSize;
     private String servingUnit;
+    private Double servingWeightGrams;
 
     private double calories;
     private double protein;

@@ -13,6 +13,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  Pencil,
+  Scale,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { mealService } from '../services/mealService';
@@ -48,10 +50,14 @@ export const MealPlanning: React.FC = () => {
     new Date().toISOString().split('T')[0]
   );
 
-  const [isAddMealModalOpen, setIsAddMealModalOpen] = useState(false);
+  // Modal & form states (supports both Add and Edit)
+  const [isMealModalOpen, setIsMealModalOpen] = useState(false);
+  const [editingMeal, setEditingMeal] = useState<MealResponse | null>(null);
   const [targetMealType, setTargetMealType] = useState<MealType>('BREAKFAST');
   const [selectedFoodId, setSelectedFoodId] = useState<string>('');
-  const [portionGrams, setPortionGrams] = useState<number>(150);
+  const [portionQuantity, setPortionQuantity] = useState<number>(150);
+  const [selectedUnit, setSelectedUnit] = useState<string>('g');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -64,13 +70,11 @@ export const MealPlanning: React.FC = () => {
 
     try {
       // 1. Fetch foods for dropdown & name resolution
-      let foodsList = mockFoods;
-      try {
-        foodsList = isDemoMode
-          ? mockFoods
-          : await foodService.getFoods();
-      } catch {
+      let foodsList: FoodResponse[] = [];
+      if (isDemoMode) {
         foodsList = mockFoods;
+      } else {
+        foodsList = await foodService.getFoods();
       }
       setAvailableFoods(foodsList);
       const map: Record<string, FoodResponse> = {};
@@ -82,31 +86,40 @@ export const MealPlanning: React.FC = () => {
         setSelectedFoodId(foodsList[0].id);
       }
 
-      // 2. Fetch Meal Plan & Summary
+      // 2. Fetch Meal Plan & Summary for the selected date
       if (isDemoMode) {
         setMealPlan(mockMealPlan);
         setDailySummary(mockDailySummary);
       } else {
         try {
-          const planRes = await mealService.getMealPlan(user.id);
+          const planRes = await mealService.getMealPlan(user.id, selectedDate);
           setMealPlan(planRes);
         } catch (planErr: any) {
           if (planErr.response?.status === 404) {
             setMealPlan(null);
           } else {
-            setMealPlan(mockMealPlan);
+            console.error('Failed to fetch meal plan:', planErr);
+            setActionError('Could not retrieve meal plan from Meal Planning Service.');
+            setMealPlan(null);
           }
         }
 
         try {
-          const summaryRes = await mealService.getDailySummary(user.id);
+          const summaryRes = await mealService.getDailySummary(user.id, selectedDate);
           setDailySummary(summaryRes);
-        } catch {
-          setDailySummary(null);
+        } catch (summaryErr: any) {
+          setDailySummary({
+            date: selectedDate,
+            totalCalories: 0,
+            totalProtein: 0,
+            totalCarbs: 0,
+            totalFat: 0,
+          });
         }
       }
     } catch (err: any) {
-      setActionError('Could not communicate with Meal Planning Service.');
+      console.error('MealPlanning data load failure:', err);
+      setActionError('Could not communicate with backend services. Ensure API Gateway is running on port 8088.');
     } finally {
       setIsLoading(false);
     }
@@ -115,6 +128,17 @@ export const MealPlanning: React.FC = () => {
   useEffect(() => {
     loadPlanData();
   }, [user, isDemoMode, selectedDate]);
+
+  // Helper to convert meal quantity to grams
+  const getMealGrams = (quantity: number, unit?: string, food?: FoodResponse): number => {
+    if (!unit || unit.toLowerCase() === 'g' || unit.toLowerCase() === 'gram' || unit.toLowerCase() === 'grams') {
+      return quantity;
+    }
+    if (food?.nutrition?.servingWeightGrams && food.nutrition.servingWeightGrams > 0) {
+      return quantity * food.nutrition.servingWeightGrams;
+    }
+    return quantity;
+  };
 
   // Create plan for the date if none exists
   const handleCreatePlan = async () => {
@@ -147,50 +171,113 @@ export const MealPlanning: React.FC = () => {
     }
   };
 
-  // Add meal to plan
-  const handleAddMeal = async (e: React.FormEvent) => {
+  // Open modal in ADD mode
+  const openAddMealModal = (type: MealType) => {
+    setEditingMeal(null);
+    setTargetMealType(type);
+    const initialFood = availableFoods.find((f) => f.id === selectedFoodId) || availableFoods[0];
+    if (initialFood) {
+      setSelectedFoodId(initialFood.id);
+      setSelectedUnit(initialFood.nutrition.servingUnit || 'g');
+      setPortionQuantity(initialFood.nutrition.servingUnit && initialFood.nutrition.servingUnit.toLowerCase() !== 'g' ? 1 : 150);
+    } else {
+      setSelectedUnit('g');
+      setPortionQuantity(150);
+    }
+    setIsMealModalOpen(true);
+  };
+
+  // Open modal in EDIT mode
+  const openEditMealModal = (meal: MealResponse) => {
+    setEditingMeal(meal);
+    setTargetMealType(meal.mealType);
+    setSelectedFoodId(meal.foodId);
+    setPortionQuantity(meal.quantity);
+    setSelectedUnit(meal.unit || 'g');
+    setIsMealModalOpen(true);
+  };
+
+  // When food selection changes in modal, adjust unit option if appropriate
+  const handleFoodSelectChange = (newFoodId: string) => {
+    setSelectedFoodId(newFoodId);
+    const food = foodsMap[newFoodId];
+    if (food && !editingMeal) {
+      const hasUnit = food.nutrition.servingUnit && food.nutrition.servingUnit.toLowerCase() !== 'g';
+      if (hasUnit) {
+        setSelectedUnit(food.nutrition.servingUnit);
+        setPortionQuantity(1);
+      } else {
+        setSelectedUnit('g');
+        setPortionQuantity(150);
+      }
+    }
+  };
+
+  // Save meal (Add or Edit)
+  const handleSaveMeal = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mealPlan || !selectedFoodId || portionGrams <= 0) return;
+    if (!mealPlan || !selectedFoodId || portionQuantity <= 0) return;
 
     setIsSubmitting(true);
     setActionError(null);
     try {
       if (isDemoMode) {
-        const newMeal: MealResponse = {
-          id: `meal_${Date.now()}`,
-          mealPlanId: mealPlan.id,
-          foodId: selectedFoodId,
-          mealType: targetMealType,
-          quantity: portionGrams,
-        };
-        const updatedMeals = [...mealPlan.meals, newMeal];
-        setMealPlan({ ...mealPlan, meals: updatedMeals });
-
-        // Update local daily summary
-        const foodItem = foodsMap[selectedFoodId];
-        if (foodItem && dailySummary) {
-          const factor = portionGrams / 100.0;
-          setDailySummary({
-            ...dailySummary,
-            totalCalories: Math.round(dailySummary.totalCalories + foodItem.nutrition.calories * factor),
-            totalProtein: Math.round(dailySummary.totalProtein + foodItem.nutrition.protein * factor),
-            totalCarbs: Math.round(dailySummary.totalCarbs + foodItem.nutrition.carbs * factor),
-            totalFat: Math.round(dailySummary.totalFat + foodItem.nutrition.fat * factor),
-          });
+        if (editingMeal) {
+          // Edit existing meal in demo mode
+          const updatedMeals = mealPlan.meals.map((m) =>
+            m.id === editingMeal.id
+              ? {
+                  ...m,
+                  foodId: selectedFoodId,
+                  mealType: targetMealType,
+                  quantity: portionQuantity,
+                  unit: selectedUnit,
+                }
+              : m
+          );
+          setMealPlan({ ...mealPlan, meals: updatedMeals });
+          setActionSuccess('Meal updated in plan (Demo Mode).');
+        } else {
+          // Add new meal in demo mode
+          const newMeal: MealResponse = {
+            id: `meal_${Date.now()}`,
+            mealPlanId: mealPlan.id,
+            foodId: selectedFoodId,
+            mealType: targetMealType,
+            quantity: portionQuantity,
+            unit: selectedUnit,
+          };
+          setMealPlan({ ...mealPlan, meals: [...mealPlan.meals, newMeal] });
+          setActionSuccess('Meal logged in plan (Demo Mode).');
         }
-        setActionSuccess('Meal logged in plan.');
       } else {
-        await mealService.addMeal(mealPlan.id, {
-          foodId: selectedFoodId,
-          mealType: targetMealType,
-          quantity: portionGrams,
-        });
+        if (editingMeal) {
+          await mealService.updateMeal(mealPlan.id, editingMeal.id, {
+            foodId: selectedFoodId,
+            mealType: targetMealType,
+            quantity: portionQuantity,
+            unit: selectedUnit,
+          });
+          setActionSuccess('Meal updated successfully.');
+        } else {
+          await mealService.addMeal(mealPlan.id, {
+            foodId: selectedFoodId,
+            mealType: targetMealType,
+            quantity: portionQuantity,
+            unit: selectedUnit,
+          });
+          setActionSuccess('Meal logged via Meal Planning Service.');
+        }
         await loadPlanData();
-        setActionSuccess('Meal logged via Meal Planning Service.');
       }
-      setIsAddMealModalOpen(false);
+      setIsMealModalOpen(false);
     } catch (err: any) {
-      setActionError('Failed to add meal. Verify Food Database Feign client connectivity.');
+      console.error('Failed to save meal:', err);
+      setActionError(
+        editingMeal
+          ? 'Failed to update meal. Verify Meal Planning Service connectivity.'
+          : 'Failed to add meal. Verify Food Database Feign client connectivity.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -218,16 +305,6 @@ export const MealPlanning: React.FC = () => {
     }
   };
 
-  // Open modal pre-selecting meal type
-  const openAddMealModal = (type: MealType) => {
-    setTargetMealType(type);
-    setPortionGrams(150);
-    if (availableFoods.length > 0 && !selectedFoodId) {
-      setSelectedFoodId(availableFoods[0].id);
-    }
-    setIsAddMealModalOpen(true);
-  };
-
   const mealTypes: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'];
 
   // Group meals
@@ -236,10 +313,14 @@ export const MealPlanning: React.FC = () => {
     return acc;
   }, {} as Record<MealType, MealResponse[]>);
 
-  // Selected food nutrition preview in modal
+  // Selected food preview calculation in modal
   const selectedFood = foodsMap[selectedFoodId];
+  const modalGrams = getMealGrams(portionQuantity, selectedUnit, selectedFood);
   const previewCalories = selectedFood
-    ? Math.round(((selectedFood.nutrition?.calories || 0) * portionGrams) / 100)
+    ? Math.round(((selectedFood.nutrition?.calories || 0) * modalGrams) / 100)
+    : 0;
+  const previewProtein = selectedFood
+    ? Math.round((((selectedFood.nutrition?.protein || 0) * modalGrams) / 100) * 10) / 10
     : 0;
 
   return (
@@ -251,7 +332,7 @@ export const MealPlanning: React.FC = () => {
             Daily Meal Planner
           </h2>
           <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-0.5">
-            Manages meal logs and computes daily nutrition live via OpenFeign and Food Database Service.
+            Log, edit, and scale meals in grams or portion units with live nutrition computation.
           </p>
         </div>
 
@@ -266,6 +347,12 @@ export const MealPlanning: React.FC = () => {
           />
         </div>
       </div>
+
+      {isDemoMode && (
+        <div className="text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 p-3 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center justify-between">
+          <span>⚠️ <strong>Demo Mode Active:</strong> Displaying simulated meal plans and calories. Meals logged will not be saved to the Meal Planning microservice.</span>
+        </div>
+      )}
 
       {actionSuccess && (
         <Alert type="success" onClose={() => setActionSuccess(null)}>
@@ -353,7 +440,8 @@ export const MealPlanning: React.FC = () => {
             const meals = groupedMeals[type];
             const typeCalories = meals.reduce((acc, m) => {
               const f = foodsMap[m.foodId];
-              return acc + (f ? (f.nutrition.calories * m.quantity) / 100 : 0);
+              const grams = getMealGrams(m.quantity, m.unit, f);
+              return acc + (f ? (f.nutrition.calories * grams) / 100 : 0);
             }, 0);
 
             return (
@@ -391,12 +479,18 @@ export const MealPlanning: React.FC = () => {
                       {meals.map((meal) => {
                         const food = foodsMap[meal.foodId];
                         const foodName = food ? food.name : `Food #${meal.foodId}`;
+                        const grams = getMealGrams(meal.quantity, meal.unit, food);
                         const cals = food
-                          ? Math.round((food.nutrition.calories * meal.quantity) / 100)
+                          ? Math.round((food.nutrition.calories * grams) / 100)
                           : null;
                         const protein = food
-                          ? Math.round(((food.nutrition.protein * meal.quantity) / 100) * 10) / 10
+                          ? Math.round(((food.nutrition.protein * grams) / 100) * 10) / 10
                           : null;
+
+                        const isGrams = !meal.unit || meal.unit.toLowerCase() === 'g' || meal.unit.toLowerCase() === 'gram';
+                        const portionDisplay = isGrams
+                          ? `${meal.quantity}g`
+                          : `${meal.quantity} ${meal.unit}${grams !== meal.quantity ? ` (${Math.round(grams)}g)` : ''}`;
 
                         return (
                           <div
@@ -408,17 +502,24 @@ export const MealPlanning: React.FC = () => {
                                 {foodName}
                               </p>
                               <p className="text-[11px] text-stone-400">
-                                {meal.quantity}g portion
+                                {portionDisplay}
                                 {protein !== null && ` • ${protein}g protein`}
                               </p>
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0">
+                            <div className="flex items-center gap-2 shrink-0">
                               {cals !== null && (
-                                <span className="font-mono text-xs font-semibold text-stone-700 dark:text-stone-300">
+                                <span className="font-mono text-xs font-semibold text-stone-700 dark:text-stone-300 mr-1">
                                   {cals} kcal
                                 </span>
                               )}
+                              <button
+                                onClick={() => openEditMealModal(meal)}
+                                className="p-1 text-stone-400 hover:text-[#1b3b2b] dark:hover:text-emerald-400 rounded-md transition-colors"
+                                title="Edit meal"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 onClick={() => handleDeleteMeal(meal.id)}
                                 className="p-1 text-stone-400 hover:text-rose-600 rounded-md transition-colors"
@@ -439,22 +540,44 @@ export const MealPlanning: React.FC = () => {
         </div>
       )}
 
-      {/* Add Meal Dialog */}
+      {/* Add / Edit Meal Dialog */}
       <Modal
-        isOpen={isAddMealModalOpen}
-        onClose={() => setIsAddMealModalOpen(false)}
-        title={`Log Meal: ${targetMealType}`}
-        description="Select a food item from the database and specify portion size in grams."
+        isOpen={isMealModalOpen}
+        onClose={() => setIsMealModalOpen(false)}
+        title={editingMeal ? 'Edit Logged Meal' : `Log Meal: ${targetMealType}`}
+        description={
+          editingMeal
+            ? 'Update the food item, meal type, portion quantity, or unit.'
+            : 'Select a food item and specify portion size in grams or serving units.'
+        }
         maxWidth="sm"
       >
-        <form onSubmit={handleAddMeal} className="space-y-4">
+        <form onSubmit={handleSaveMeal} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
+              Meal Category *
+            </label>
+            <select
+              value={targetMealType}
+              onChange={(e) => setTargetMealType(e.target.value as MealType)}
+              className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3.5 py-2 text-sm text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#1b3b2b]"
+              required
+            >
+              {mealTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
               Select Food Item *
             </label>
             <select
               value={selectedFoodId}
-              onChange={(e) => setSelectedFoodId(e.target.value)}
+              onChange={(e) => handleFoodSelectChange(e.target.value)}
               className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3.5 py-2 text-sm text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#1b3b2b]"
               required
             >
@@ -466,27 +589,65 @@ export const MealPlanning: React.FC = () => {
             </select>
           </div>
 
-          <Input
-            label="Portion Size (Grams) *"
-            type="number"
-            min="10"
-            step="5"
-            value={portionGrams}
-            onChange={(e) => setPortionGrams(Number(e.target.value))}
-            helperText={`Provides approximately ${previewCalories} calories`}
-            required
-          />
+          {/* Unit & Quantity Grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
+                Portion Unit *
+              </label>
+              <select
+                value={selectedUnit}
+                onChange={(e) => setSelectedUnit(e.target.value)}
+                className="w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#1b3b2b]"
+              >
+                <option value="g">Grams (g)</option>
+                {selectedFood?.nutrition?.servingUnit &&
+                  selectedFood.nutrition.servingUnit.toLowerCase() !== 'g' && (
+                    <option value={selectedFood.nutrition.servingUnit}>
+                      {selectedFood.nutrition.servingUnit}{' '}
+                      {selectedFood.nutrition.servingWeightGrams
+                        ? `(≈${selectedFood.nutrition.servingWeightGrams}g)`
+                        : ''}
+                    </option>
+                  )}
+              </select>
+            </div>
+
+            <Input
+              label={`Quantity (${selectedUnit}) *`}
+              type="number"
+              min={selectedUnit === 'g' ? '5' : '0.25'}
+              step={selectedUnit === 'g' ? '5' : '0.5'}
+              value={portionQuantity}
+              onChange={(e) => setPortionQuantity(Number(e.target.value))}
+              required
+            />
+          </div>
+
+          {/* Real-time preview */}
+          {selectedFood && (
+            <div className="p-3 bg-stone-50 dark:bg-stone-900/70 rounded-lg border border-stone-200 dark:border-stone-800 text-xs flex items-center justify-between">
+              <div>
+                <span className="text-stone-500">Calculated portion:</span>{' '}
+                <strong className="text-stone-800 dark:text-stone-200">{Math.round(modalGrams)}g</strong>
+              </div>
+              <div className="flex items-center gap-3 font-semibold">
+                <span className="text-amber-600">{previewCalories} kcal</span>
+                <span className="text-[#1b3b2b] dark:text-emerald-400">{previewProtein}g protein</span>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-stone-100 dark:border-stone-800">
             <Button
               type="button"
               variant="outline"
-              onClick={() => setIsAddMealModalOpen(false)}
+              onClick={() => setIsMealModalOpen(false)}
             >
               Cancel
             </Button>
             <Button type="submit" isLoading={isSubmitting}>
-              Add to {targetMealType}
+              {editingMeal ? 'Update Meal' : `Add to ${targetMealType}`}
             </Button>
           </div>
         </form>
@@ -494,3 +655,4 @@ export const MealPlanning: React.FC = () => {
     </div>
   );
 };
+

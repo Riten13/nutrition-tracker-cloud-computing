@@ -40,6 +40,21 @@ public class JwtUtils {
                 .compact();
     }
 
+    public String generateToken(Long userId, String email) {
+        return generateToken(userId, email, "ROLE_USER");
+    }
+
+    public String generateToken(Long userId, String email, String role) {
+        return Jwts.builder()
+                .subject(email)
+                .claim("userId", userId)
+                .claim("role", (role != null && !role.isBlank()) ? role : "ROLE_USER")
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+                .signWith(getSigningKey())
+                .compact();
+    }
+
     public String generateTokenFromEmail(String email) {
         return Jwts.builder()
                 .subject(email)
@@ -56,6 +71,42 @@ public class JwtUtils {
                 .parseSignedClaims(token)
                 .getPayload()
                 .getSubject();
+    }
+
+    public Long getUserIdFromJwtToken(String token) {
+        try {
+            Object userIdObj = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload()
+                    .get("userId");
+            if (userIdObj instanceof Number) {
+                return ((Number) userIdObj).longValue();
+            } else if (userIdObj != null) {
+                return Long.parseLong(userIdObj.toString());
+            }
+        } catch (Exception e) {
+            // userId claim not present or malformed
+        }
+        return null;
+    }
+
+    public String getRoleFromJwtToken(String token) {
+        try {
+            Object roleObj = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload()
+                    .get("role");
+            if (roleObj != null) {
+                return roleObj.toString();
+            }
+        } catch (Exception e) {
+            // role claim not present
+        }
+        return "ROLE_USER";
     }
 
     public boolean validateJwtToken(String authToken) {

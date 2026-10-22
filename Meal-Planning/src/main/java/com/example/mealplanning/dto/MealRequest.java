@@ -17,4 +17,6 @@ public class MealRequest {
     private MealType mealType;
 
     private Double quantity;
+
+    private String unit;
 }

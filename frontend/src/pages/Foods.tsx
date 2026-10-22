@@ -91,8 +91,13 @@ export const Foods: React.FC = () => {
         setFoods(result);
       }
     } catch (err: any) {
-      console.warn('Food Database Service API call failed, falling back to mockFoods');
-      setFoods(mockFoods);
+      console.error('Food Database Service API call failed:', err);
+      setActionError(
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to load foods from Food Database Service. Please check backend connection.'
+      );
+      setFoods([]);
     } finally {
       setIsLoading(false);
     }
@@ -106,8 +111,12 @@ export const Foods: React.FC = () => {
   }, [searchTerm, selectedCategory, isDemoMode]);
 
   const categories = useMemo(() => {
-    const cats = new Set(mockFoods.map((f) => f.category));
-    foods.forEach((f) => cats.add(f.category));
+    const cats = new Set<string>();
+    const defaultCats = ['Vegetables', 'Grains', 'Proteins', 'Dairy', 'Snacks', 'Beverages', 'Legumes'];
+    defaultCats.forEach((c) => cats.add(c));
+    foods.forEach((f) => {
+      if (f.category) cats.add(f.category);
+    });
     return ['ALL', ...Array.from(cats)];
   }, [foods]);
 
@@ -319,6 +328,12 @@ export const Foods: React.FC = () => {
           Add Food Item
         </Button>
       </div>
+
+      {isDemoMode && (
+        <div className="text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 p-3 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center justify-between">
+          <span>⚠️ <strong>Demo Mode Active:</strong> Displaying simulated food items. Any added foods are not saved to the Food Database microservice.</span>
+        </div>
+      )}
 
       {actionSuccess && (
         <Alert

@@ -30,6 +30,7 @@ import java.util.List;
 @RequestMapping("/api/foods")
 @RequiredArgsConstructor
 @Tag(name = "Food API", description = "Endpoints for managing food and nutrition master data")
+@io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
 public class FoodController {
 
     private final FoodService foodService;

@@ -23,6 +23,14 @@ export interface AllergyDto {
   name: string;
 }
 
+export interface NutritionGoalDto {
+  fitnessGoal?: 'LOSE_WEIGHT' | 'MAINTAIN_WEIGHT' | 'GAIN_WEIGHT' | string;
+  calorieTarget?: number;
+  proteinTarget?: number;
+  carbTarget?: number;
+  fatTarget?: number;
+}
+
 export interface UserProfileResponse {
   id: number;
   name: string;
@@ -30,6 +38,7 @@ export interface UserProfileResponse {
   profile?: ProfileDto;
   allergies?: AllergyDto[];
   dietaryPreference?: DietaryPreferenceDto;
+  nutritionGoal?: NutritionGoalDto;
 }
 
 export interface LoginRequest {
@@ -67,6 +76,7 @@ export interface AuthResponse {
 export interface NutritionDto {
   servingSize: number;
   servingUnit: string;
+  servingWeightGrams?: number;
   calories: number;
   protein: number;
   carbs: number;
@@ -104,7 +114,8 @@ export interface MealPlanRequest {
 export interface MealRequest {
   foodId: string;
   mealType: MealType;
-  quantity: number; // in grams (nutrition is scaled relative to 100g)
+  quantity: number; // quantity in grams or specified unit
+  unit?: string; // e.g. "g", "piece", "bowl", "cup"
 }
 
 export interface MealResponse {
@@ -113,6 +124,7 @@ export interface MealResponse {
   foodId: string;
   mealType: MealType;
   quantity: number;
+  unit?: string;
 }
 
 export interface MealPlanResponse {

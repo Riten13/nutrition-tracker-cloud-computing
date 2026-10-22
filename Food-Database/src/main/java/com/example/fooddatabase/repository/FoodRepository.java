@@ -5,6 +5,7 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Repository interface for the "foods" MongoDB collection.
@@ -30,4 +31,9 @@ public interface FoodRepository extends MongoRepository<Food, String> {
 
     // Filter foods by exact category (case-insensitive)
     List<Food> findByCategoryIgnoreCase(String category);
+
+    // Exact check for seeding
+    boolean existsByNameIgnoreCase(String name);
+
+    Optional<Food> findByNameIgnoreCase(String name);
 }

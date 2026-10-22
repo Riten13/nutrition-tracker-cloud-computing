@@ -1,20 +1,13 @@
 package com.example.userprofile.entity;
 
-import jakarta.persistence.*;
 import lombok.*;
 
-@Entity
-@Table(name = "profiles")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class Profile {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
 
     private Integer age;
 
@@ -23,8 +16,4 @@ public class Profile {
     private Double height;
 
     private String activityLevel;
-
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
 }

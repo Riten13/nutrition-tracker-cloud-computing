@@ -4,6 +4,7 @@ import {
   ProfileDto,
   AllergyDto,
   DietaryPreferenceDto,
+  NutritionGoalDto,
 } from '../types';
 
 export const userService = {
@@ -14,6 +15,17 @@ export const userService = {
 
   async updateProfile(userId: number, profile: ProfileDto): Promise<ProfileDto> {
     const response = await api.put<ProfileDto>(`/api/users/${userId}`, profile);
+    return response.data;
+  },
+
+  async updateNutritionGoals(
+    userId: number,
+    goals: NutritionGoalDto
+  ): Promise<NutritionGoalDto> {
+    const response = await api.put<NutritionGoalDto>(
+      `/api/users/${userId}/goals`,
+      goals
+    );
     return response.data;
   },
 

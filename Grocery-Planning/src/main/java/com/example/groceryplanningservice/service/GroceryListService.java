@@ -10,25 +10,17 @@ import com.example.groceryplanningservice.exception.GroceryListNotFoundException
 import com.example.groceryplanningservice.repository.GroceryItemRepository;
 import com.example.groceryplanningservice.repository.GroceryListRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
-/**
- * Service layer for all grocery list and grocery item operations.
- *
- * <p>Responsibility chain:
- * <pre>
- * Controller
- *     └─ GroceryListService
- *           ├─ GroceryListRepository  (MongoDB – grocery_lists)
- *           ├─ GroceryItemRepository  (MongoDB – grocery_items)
- *           └─ FoodServiceClient      (OpenFeign → Food Database Service)
- * </pre>
- */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class GroceryListService {
@@ -42,12 +34,29 @@ public class GroceryListService {
     // =========================================================================
 
     /**
-     * Create a new ACTIVE grocery list for a user.
-     *
-     * @param request the request containing the userId
-     * @return the newly created grocery list (without items)
+     * Create an ACTIVE grocery list for a user.
+     * If an ACTIVE list already exists, returns the existing list without duplicating.
      */
-    public GroceryListResponse createGroceryList(GroceryListRequest request) {
+    public GroceryListResponse createGroceryList(GroceryListRequest request, Long authenticatedUserId) {
+        if (authenticatedUserId != null && !request.getUserId().equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Access denied: You cannot create a grocery list for another user");
+        }
+
+        // Check if an active list already exists
+        Optional<GroceryList> existing = groceryListRepository
+                .findFirstByUserIdAndStatusOrderByCreatedAtDesc(request.getUserId(), GroceryListStatus.ACTIVE);
+
+        if (existing.isPresent()) {
+            GroceryList list = existing.get();
+            List<GroceryItem> items = groceryItemRepository.findByGroceryListId(list.getId());
+            List<GroceryItemResponse> itemResponses = items.stream()
+                    .map(this::toItemResponse)
+                    .collect(Collectors.toList());
+            GroceryListResponse response = toListResponseWithoutItems(list);
+            response.setItems(itemResponses);
+            return response;
+        }
+
         GroceryList list = GroceryList.builder()
                 .userId(request.getUserId())
                 .status(GroceryListStatus.ACTIVE)
@@ -55,57 +64,77 @@ public class GroceryListService {
                 .build();
 
         GroceryList saved = groceryListRepository.save(list);
-        return toListResponseWithoutItems(saved);
+        GroceryListResponse response = toListResponseWithoutItems(saved);
+        response.setItems(List.of());
+        return response;
+    }
+
+    public GroceryListResponse createGroceryList(GroceryListRequest request) {
+        return createGroceryList(request, null);
     }
 
     /**
      * Get the user's ACTIVE grocery list together with all its items.
-     *
-     * @param userId the user ID
-     * @return the active grocery list with items
-     * @throws GroceryListNotFoundException if no active list exists for the user
+     * Safely handles duplicate active lists by merging items into the primary list and archiving duplicates.
      */
-    public GroceryListResponse getActiveGroceryList(Long userId) {
-        GroceryList list = groceryListRepository
-                .findByUserIdAndStatus(userId, GroceryListStatus.ACTIVE)
-                .orElseThrow(() -> new GroceryListNotFoundException(
-                        "No active grocery list found for userId: " + userId));
+    public GroceryListResponse getActiveGroceryList(Long userId, Long authenticatedUserId) {
+        if (authenticatedUserId != null && !userId.equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Access denied: You can only view your own grocery list");
+        }
 
-        List<GroceryItem> items = groceryItemRepository.findByGroceryListId(list.getId());
+        List<GroceryList> activeLists = groceryListRepository
+                .findAllByUserIdAndStatusOrderByCreatedAtDesc(userId, GroceryListStatus.ACTIVE);
+
+        if (activeLists.isEmpty()) {
+            throw new GroceryListNotFoundException("No active grocery list found for userId: " + userId);
+        }
+
+        // Primary list is the most recently created active list
+        GroceryList primaryList = activeLists.get(0);
+
+        // If duplicate active lists exist, safely merge items into primary and archive duplicates
+        if (activeLists.size() > 1) {
+            log.warn("Found {} active grocery lists for userId {}. Consolidating duplicates safely.", activeLists.size(), userId);
+            for (int i = 1; i < activeLists.size(); i++) {
+                GroceryList duplicate = activeLists.get(i);
+                List<GroceryItem> duplicateItems = groceryItemRepository.findByGroceryListId(duplicate.getId());
+                for (GroceryItem item : duplicateItems) {
+                    item.setGroceryListId(primaryList.getId());
+                    groceryItemRepository.save(item);
+                }
+                duplicate.setStatus(GroceryListStatus.ARCHIVED);
+                groceryListRepository.save(duplicate);
+            }
+        }
+
+        List<GroceryItem> items = groceryItemRepository.findByGroceryListId(primaryList.getId());
         List<GroceryItemResponse> itemResponses = items.stream()
                 .map(this::toItemResponse)
                 .collect(Collectors.toList());
 
-        GroceryListResponse response = toListResponseWithoutItems(list);
+        GroceryListResponse response = toListResponseWithoutItems(primaryList);
         response.setItems(itemResponses);
         return response;
+    }
+
+    public GroceryListResponse getActiveGroceryList(Long userId) {
+        return getActiveGroceryList(userId, null);
     }
 
     // =========================================================================
     // Grocery Item operations
     // =========================================================================
 
-    /**
-     * Add a grocery item to an existing list.
-     *
-     * <p>Before saving, this method calls the Food Database Service via OpenFeign
-     * to validate that the food exists. Only the {@code foodId} is stored locally –
-     * no food name, category, or nutrition data is duplicated.
-     *
-     * @param listId  the grocery list ID
-     * @param request the item to add
-     * @return the saved grocery item
-     * @throws GroceryListNotFoundException if the list is not found
-     */
-    public GroceryItemResponse addGroceryItem(String listId, GroceryItemRequest request) {
-        // Ensure the list exists
+    public GroceryItemResponse addGroceryItem(String listId, GroceryItemRequest request, Long authenticatedUserId) {
         GroceryList list = groceryListRepository.findById(listId)
                 .orElseThrow(() -> new GroceryListNotFoundException(
                         "Grocery list not found with id: " + listId));
 
-        // Validate that the food exists in the Food Database Service.
-        // We call the service but intentionally discard all data except
-        // confirming the food is real. foodId is the only thing we keep.
+        if (authenticatedUserId != null && !list.getUserId().equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Access denied: You do not own this grocery list");
+        }
+
+        // Validate that the food exists in Food Database Service
         foodServiceClient.getFoodById(request.getFoodId());
 
         GroceryItem item = GroceryItem.builder()
@@ -121,30 +150,26 @@ public class GroceryListService {
         return toItemResponse(saved);
     }
 
-    /**
-     * Update an existing grocery item.
-     * Only non-null fields in the request are applied (partial update).
-     *
-     * @param listId  the grocery list ID
-     * @param itemId  the grocery item ID
-     * @param request the fields to update
-     * @return the updated grocery item
-     * @throws GroceryListNotFoundException  if the list is not found
-     * @throws GroceryItemNotFoundException if the item is not found in the list
-     */
+    public GroceryItemResponse addGroceryItem(String listId, GroceryItemRequest request) {
+        return addGroceryItem(listId, request, null);
+    }
+
     public GroceryItemResponse updateGroceryItem(String listId, String itemId,
-                                                  GroceryItemUpdateRequest request) {
-        // Ensure the list exists
-        groceryListRepository.findById(listId)
+                                                 GroceryItemUpdateRequest request,
+                                                 Long authenticatedUserId) {
+        GroceryList list = groceryListRepository.findById(listId)
                 .orElseThrow(() -> new GroceryListNotFoundException(
                         "Grocery list not found with id: " + listId));
+
+        if (authenticatedUserId != null && !list.getUserId().equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Access denied: You do not own this grocery list");
+        }
 
         GroceryItem item = groceryItemRepository
                 .findByIdAndGroceryListId(itemId, listId)
                 .orElseThrow(() -> new GroceryItemNotFoundException(
                         "Grocery item not found with id: " + itemId + " in list: " + listId));
 
-        // Apply only the fields that were provided
         if (request.getQuantity() != null) {
             item.setQuantity(request.getQuantity());
         }
@@ -162,19 +187,19 @@ public class GroceryListService {
         return toItemResponse(updated);
     }
 
-    /**
-     * Delete a grocery item from a list.
-     *
-     * @param listId the grocery list ID
-     * @param itemId the grocery item ID
-     * @throws GroceryListNotFoundException  if the list is not found
-     * @throws GroceryItemNotFoundException if the item is not found in the list
-     */
-    public void deleteGroceryItem(String listId, String itemId) {
-        // Ensure the list exists
-        groceryListRepository.findById(listId)
+    public GroceryItemResponse updateGroceryItem(String listId, String itemId,
+                                                 GroceryItemUpdateRequest request) {
+        return updateGroceryItem(listId, itemId, request, null);
+    }
+
+    public void deleteGroceryItem(String listId, String itemId, Long authenticatedUserId) {
+        GroceryList list = groceryListRepository.findById(listId)
                 .orElseThrow(() -> new GroceryListNotFoundException(
                         "Grocery list not found with id: " + listId));
+
+        if (authenticatedUserId != null && !list.getUserId().equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Access denied: You do not own this grocery list");
+        }
 
         GroceryItem item = groceryItemRepository
                 .findByIdAndGroceryListId(itemId, listId)
@@ -184,24 +209,22 @@ public class GroceryListService {
         groceryItemRepository.delete(item);
     }
 
+    public void deleteGroceryItem(String listId, String itemId) {
+        deleteGroceryItem(listId, itemId, null);
+    }
+
     // =========================================================================
     // Estimated Cost
     // =========================================================================
 
-    /**
-     * Calculate the estimated total cost for all items in a grocery list.
-     *
-     * <p>Formula: Σ (estimatedPrice × quantity) for each item.
-     * Items without an estimated price contribute 0 to the total.
-     *
-     * @param listId the grocery list ID
-     * @return the estimated cost response
-     * @throws GroceryListNotFoundException if the list is not found
-     */
-    public EstimatedCostResponse getEstimatedCost(String listId) {
-        groceryListRepository.findById(listId)
+    public EstimatedCostResponse getEstimatedCost(String listId, Long authenticatedUserId) {
+        GroceryList list = groceryListRepository.findById(listId)
                 .orElseThrow(() -> new GroceryListNotFoundException(
                         "Grocery list not found with id: " + listId));
+
+        if (authenticatedUserId != null && !list.getUserId().equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Access denied: You do not own this grocery list");
+        }
 
         List<GroceryItem> items = groceryItemRepository.findByGroceryListId(listId);
 
@@ -215,6 +238,10 @@ public class GroceryListService {
                 .listId(listId)
                 .estimatedCost(total)
                 .build();
+    }
+
+    public EstimatedCostResponse getEstimatedCost(String listId) {
+        return getEstimatedCost(listId, null);
     }
 
     // =========================================================================

@@ -11,10 +11,17 @@ import {
   LogOut,
   Loader2,
   X,
+  Target,
+  Sparkles,
+  Flame,
+  Dumbbell,
+  Wheat,
+  Droplet,
+  Info,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { userService } from '../services/userService';
-import { AllergyDto, DietaryPreferenceDto, ProfileDto, UserProfileResponse } from '../types';
+import { AllergyDto, DietaryPreferenceDto, NutritionGoalDto, ProfileDto, UserProfileResponse } from '../types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -45,6 +52,24 @@ export const Profile: React.FC = () => {
   const [allergies, setAllergies] = useState<AllergyDto[]>(user?.allergies || []);
   const [newAllergyName, setNewAllergyName] = useState('');
 
+  // Nutrition & Fitness Goals
+  const [fitnessGoal, setFitnessGoal] = useState<string>(
+    user?.nutritionGoal?.fitnessGoal || 'MAINTAIN_WEIGHT'
+  );
+  const [calorieTarget, setCalorieTarget] = useState<number | ''>(
+    user?.nutritionGoal?.calorieTarget ?? ''
+  );
+  const [proteinTarget, setProteinTarget] = useState<number | ''>(
+    user?.nutritionGoal?.proteinTarget ?? ''
+  );
+  const [carbTarget, setCarbTarget] = useState<number | ''>(
+    user?.nutritionGoal?.carbTarget ?? ''
+  );
+  const [fatTarget, setFatTarget] = useState<number | ''>(
+    user?.nutritionGoal?.fatTarget ?? ''
+  );
+  const [isSavingGoals, setIsSavingGoals] = useState(false);
+
   // Status flags
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavingPreferences, setIsSavingPreferences] = useState(false);
@@ -66,8 +91,95 @@ export const Profile: React.FC = () => {
         dairyFree: user.dietaryPreference?.dairyFree ?? false,
       });
       setAllergies(user.allergies || []);
+      if (user.nutritionGoal) {
+        setFitnessGoal(user.nutritionGoal.fitnessGoal || 'MAINTAIN_WEIGHT');
+        setCalorieTarget(user.nutritionGoal.calorieTarget ?? '');
+        setProteinTarget(user.nutritionGoal.proteinTarget ?? '');
+        setCarbTarget(user.nutritionGoal.carbTarget ?? '');
+        setFatTarget(user.nutritionGoal.fatTarget ?? '');
+      }
     }
   }, [user]);
+
+  // Calculate Suggested Nutrition Targets (Mifflin-St Jeor formula helper)
+  const handleCalculateSuggestedTargets = () => {
+    const currentWeight = Number(weight) || user?.profile?.weight || 70;
+    const currentHeight = Number(height) || user?.profile?.height || 170;
+    const currentAge = Number(age) || user?.profile?.age || 28;
+    const currentActivity = activityLevel || user?.profile?.activityLevel || 'Active';
+
+    // Mifflin-St Jeor BMR estimate
+    const bmr = 10 * currentWeight + 6.25 * currentHeight - 5 * currentAge + 5;
+    const activityMultipliers: Record<string, number> = {
+      Sedentary: 1.2,
+      'Lightly Active': 1.375,
+      'Moderately Active': 1.55,
+      Active: 1.725,
+      'Very Active': 1.9,
+    };
+    const tdee = bmr * (activityMultipliers[currentActivity] || 1.55);
+
+    let targetCals = Math.round(tdee);
+    if (fitnessGoal === 'LOSE_WEIGHT') {
+      targetCals = Math.round(tdee - 400); // Sustainable 400 kcal deficit
+    } else if (fitnessGoal === 'GAIN_WEIGHT') {
+      targetCals = Math.round(tdee + 350); // Clean 350 kcal surplus
+    }
+
+    // Protein: ~1.8g - 2.0g per kg body weight
+    const targetProtein = Math.round(currentWeight * (fitnessGoal === 'LOSE_WEIGHT' ? 2.0 : 1.8));
+    // Fat: ~25% of daily calories (1g fat = 9 kcal)
+    const targetFat = Math.round((targetCals * 0.25) / 9);
+    // Carbs: Remainder of daily calories (1g carb = 4 kcal)
+    const targetCarbs = Math.max(50, Math.round((targetCals - (targetProtein * 4 + targetFat * 9)) / 4));
+
+    setCalorieTarget(targetCals);
+    setProteinTarget(targetProtein);
+    setFatTarget(targetFat);
+    setCarbTarget(targetCarbs);
+    setSuccessMessage('Calculated suggested targets. Adjust any target as needed before saving.');
+  };
+
+  // Save Nutrition Goals (PUT /api/users/{userId}/goals)
+  const handleSaveGoals = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setIsSavingGoals(true);
+    setSuccessMessage(null);
+    setErrorMessage(null);
+
+    const goalsDto: NutritionGoalDto = {
+      fitnessGoal,
+      calorieTarget: calorieTarget === '' ? undefined : Number(calorieTarget),
+      proteinTarget: proteinTarget === '' ? undefined : Number(proteinTarget),
+      carbTarget: carbTarget === '' ? undefined : Number(carbTarget),
+      fatTarget: fatTarget === '' ? undefined : Number(fatTarget),
+    };
+
+    try {
+      if (isDemoMode) {
+        const updated: UserProfileResponse = {
+          ...user,
+          nutritionGoal: goalsDto,
+        };
+        updateUser(updated);
+        setSuccessMessage('Personalized nutrition targets saved in local demo state.');
+      } else {
+        const updatedGoals = await userService.updateNutritionGoals(user.id, goalsDto);
+        const updated: UserProfileResponse = {
+          ...user,
+          nutritionGoal: updatedGoals,
+        };
+        updateUser(updated);
+        setSuccessMessage('Personalized nutrition targets saved via User Profile Service.');
+      }
+    } catch (err: any) {
+      setErrorMessage('Failed to save nutrition goals. Please check User Profile Service connection.');
+    } finally {
+      setIsSavingGoals(false);
+    }
+  };
 
   // Save Physical Profile (PUT /api/users/{userId})
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -366,6 +478,150 @@ export const Profile: React.FC = () => {
             <div className="flex justify-end pt-2">
               <Button type="submit" isLoading={isSavingProfile} leftIcon={<Save className="w-4 h-4" />}>
                 Save Biometrics
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Personalized Nutrition & Fitness Goals Card */}
+      <Card>
+        <CardHeader className="p-5 pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-[#84cc16]" />
+              <CardTitle className="text-base">Personalized Nutrition Goals & Targets</CardTitle>
+            </div>
+            <Badge variant="lime">Phase 2 Core</Badge>
+          </div>
+          <CardDescription>
+            Set your fitness objective and customize daily caloric and macronutrient targets. Stored in User Profile Service.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-5 pt-0">
+          <form onSubmit={handleSaveGoals} className="space-y-4">
+            {/* Fitness Goal Type */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
+                Primary Fitness Objective
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { id: 'LOSE_WEIGHT', label: 'Lose Weight', desc: 'Caloric deficit focused on fat loss' },
+                  { id: 'MAINTAIN_WEIGHT', label: 'Maintain Weight', desc: 'Balanced energy expenditure' },
+                  { id: 'GAIN_WEIGHT', label: 'Gain Weight', desc: 'Caloric surplus for muscle building' },
+                ].map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setFitnessGoal(g.id)}
+                    className={`p-3 rounded-lg border text-left transition-all ${
+                      fitnessGoal === g.id
+                        ? 'border-[#1b3b2b] dark:border-emerald-500 bg-[#1b3b2b]/5 dark:bg-emerald-950/20 ring-1 ring-[#1b3b2b] dark:ring-emerald-500'
+                        : 'border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-900/40'
+                    }`}
+                  >
+                    <span className="block text-xs font-bold text-stone-900 dark:text-stone-100">
+                      {g.label}
+                    </span>
+                    <span className="block text-[11px] text-stone-500 mt-0.5">
+                      {g.desc}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Editable Macro & Calorie Targets */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300">
+                  Daily Nutritional Targets (User-Editable)
+                </label>
+                <button
+                  type="button"
+                  onClick={handleCalculateSuggestedTargets}
+                  className="inline-flex items-center gap-1.5 text-xs text-[#1b3b2b] dark:text-emerald-400 font-medium hover:underline"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#84cc16]" />
+                  <span>Calculate Suggested Targets</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="relative">
+                  <Input
+                    label="Calories (kcal)"
+                    type="number"
+                    min="500"
+                    max="10000"
+                    value={calorieTarget}
+                    onChange={(e) =>
+                      setCalorieTarget(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    placeholder="2000"
+                  />
+                  <Flame className="w-4 h-4 text-amber-500 absolute top-7 right-3 pointer-events-none" />
+                </div>
+
+                <div className="relative">
+                  <Input
+                    label="Protein (g)"
+                    type="number"
+                    min="10"
+                    max="500"
+                    value={proteinTarget}
+                    onChange={(e) =>
+                      setProteinTarget(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    placeholder="140"
+                  />
+                  <Dumbbell className="w-4 h-4 text-[#1b3b2b] dark:text-emerald-400 absolute top-7 right-3 pointer-events-none" />
+                </div>
+
+                <div className="relative">
+                  <Input
+                    label="Carbs (g)"
+                    type="number"
+                    min="10"
+                    max="1000"
+                    value={carbTarget}
+                    onChange={(e) =>
+                      setCarbTarget(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    placeholder="220"
+                  />
+                  <Wheat className="w-4 h-4 text-[#84cc16] absolute top-7 right-3 pointer-events-none" />
+                </div>
+
+                <div className="relative">
+                  <Input
+                    label="Fats (g)"
+                    type="number"
+                    min="10"
+                    max="300"
+                    value={fatTarget}
+                    onChange={(e) =>
+                      setFatTarget(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    placeholder="65"
+                  />
+                  <Droplet className="w-4 h-4 text-amber-600 absolute top-7 right-3 pointer-events-none" />
+                </div>
+              </div>
+            </div>
+
+            {/* Medical / Estimation Disclaimer */}
+            <div className="flex items-start gap-2.5 p-3 rounded-lg bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-[11px] text-stone-500">
+              <Info className="w-4 h-4 text-stone-400 shrink-0 mt-0.5" />
+              <p>
+                <strong>Advisory Note:</strong> Suggested calculations are mathematical estimates based on standard nutritional formulas (Mifflin-St Jeor TDEE) and general dietary guidelines. They do not constitute personalized medical or clinical advice. All target values remain fully user-editable to match your specific dietary needs.
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <Button type="submit" isLoading={isSavingGoals} leftIcon={<Save className="w-4 h-4" />}>
+                Save Nutrition Goals
               </Button>
             </div>
           </form>

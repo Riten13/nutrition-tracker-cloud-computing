@@ -19,7 +19,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,18 +28,21 @@ import java.util.List;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final SequenceGeneratorService sequenceGeneratorService;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
     private final UserService userService;
 
-    @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new BadRequestException("Email is already in use: " + request.getEmail());
         }
 
+        long userId = sequenceGeneratorService.generateSequence(User.SEQUENCE_NAME);
+
         User user = User.builder()
+                .id(userId)
                 .name(request.getName())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
@@ -48,7 +50,6 @@ public class AuthService {
 
         // Create profile from request
         Profile profile = Profile.builder()
-                .user(user)
                 .age(request.getAge())
                 .weight(request.getWeight())
                 .height(request.getHeight())
@@ -63,7 +64,6 @@ public class AuthService {
                 .keto(request.getKeto() != null ? request.getKeto() : false)
                 .glutenFree(request.getGlutenFree() != null ? request.getGlutenFree() : false)
                 .dairyFree(request.getDairyFree() != null ? request.getDairyFree() : false)
-                .user(user)
                 .build();
         user.setDietaryPreference(preference);
 
@@ -72,8 +72,8 @@ public class AuthService {
             List<Allergy> allergyList = new ArrayList<>();
             for (String allergyName : request.getAllergies()) {
                 Allergy allergy = Allergy.builder()
+                        .id(sequenceGeneratorService.generateSequence(Allergy.SEQUENCE_NAME))
                         .name(allergyName)
-                        .user(user)
                         .build();
                 allergyList.add(allergy);
             }
@@ -82,8 +82,8 @@ public class AuthService {
 
         User savedUser = userRepository.save(user);
 
-        String token = jwtUtils.generateTokenFromEmail(savedUser.getEmail());
-        
+        String token = jwtUtils.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole());
+
         UserProfileResponse userProfile = userService.getUserProfile(savedUser.getId(), savedUser.getEmail());
 
         return AuthResponse.builder()
@@ -99,11 +99,11 @@ public class AuthService {
         );
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        String token = jwtUtils.generateToken(userDetails);
 
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new BadRequestException("User not found"));
+
+        String token = jwtUtils.generateToken(user.getId(), user.getEmail(), user.getRole());
 
         UserProfileResponse userProfile = userService.getUserProfile(user.getId(), user.getEmail());
 

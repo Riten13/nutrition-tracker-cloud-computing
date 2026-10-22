@@ -24,4 +24,6 @@ public class Meal {
     private MealType mealType;
 
     private Double quantity;
+
+    private String unit;
 }

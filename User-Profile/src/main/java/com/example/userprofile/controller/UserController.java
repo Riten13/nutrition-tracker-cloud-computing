@@ -117,4 +117,20 @@ public class UserController {
         DietaryPreferenceDto updatedPreference = userService.updateDietaryPreference(userId, preferenceDto, userDetails.getUsername());
         return ResponseEntity.ok(updatedPreference);
     }
+
+    @Operation(summary = "Update Nutrition Goals", description = "Updates personalized nutrition and fitness targets (calories, protein, carbs, fat, fitness goal).")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Goals updated successfully"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @ApiResponse(responseCode = "404", description = "User not found")
+    })
+    @PutMapping("/{userId}/goals")
+    public ResponseEntity<NutritionGoalDto> updateNutritionGoal(
+            @Parameter(description = "ID of the user") @PathVariable Long userId,
+            @RequestBody NutritionGoalDto goalDto,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        NutritionGoalDto updatedGoals = userService.updateNutritionGoal(userId, goalDto, userDetails.getUsername());
+        return ResponseEntity.ok(updatedGoals);
+    }
 }

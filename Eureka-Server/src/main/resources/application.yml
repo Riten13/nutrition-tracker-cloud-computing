@@ -7,7 +7,7 @@ spring:
 
 eureka:
   instance:
-    hostname: localhost
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
   client:
     register-with-eureka: false
     fetch-registry: false
@@ -16,3 +16,4 @@ eureka:
   server:
     enable-self-preservation: false
     wait-time-in-ms-when-sync-empty: 0
+    response-cache-update-interval-ms: 5000

@@ -27,6 +27,13 @@ export const mockUser: UserProfileResponse = {
     { id: 1, name: 'Peanuts' },
     { id: 2, name: 'Shellfish' },
   ],
+  nutritionGoal: {
+    fitnessGoal: 'MAINTAIN_WEIGHT',
+    calorieTarget: 2200,
+    proteinTarget: 140,
+    carbTarget: 240,
+    fatTarget: 65,
+  },
 };
 
 export const mockFoods: FoodResponse[] = [
