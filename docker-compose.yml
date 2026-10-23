@@ -74,7 +74,12 @@ services:
       SPRING_DATA_MONGODB_URI: ${FOOD_DB_MONGODB_URI:-mongodb+srv://chatgpt2:riten13@cluster0.ioo4yf3.mongodb.net/food_database?appName=Cluster0}
       EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
       JWT_SECRET: ${JWT_SECRET}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-2}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-nutrition-tracker-food-images-2026-new}
+      AWS_PROFILE: ${AWS_PROFILE:-}
       JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+    volumes:
+      - ${USERPROFILE:-~}/.aws:/root/.aws:ro
     ports:
       - "3000:3000"
     depends_on:

@@ -30,4 +30,10 @@ public class FoodResponse {
 
     @Schema(description = "Embedded nutrition information for this food")
     private NutritionDto nutrition;
+
+    @Schema(description = "S3 object key for food image (if stored)", example = "food-images/chicken_breast_123.jpg")
+    private String imageKey;
+
+    @Schema(description = "Temporary presigned GET URL for food image display", example = "https://nutrition-tracker-food-images-2026-new.s3.ap-southeast-2.amazonaws.com/...")
+    private String imageUrl;
 }

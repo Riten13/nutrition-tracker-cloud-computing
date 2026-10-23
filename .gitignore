@@ -29,4 +29,9 @@ logs/
 !**/src/**/**.jar
 
 # Environment / secrets (never commit real credentials)
+.env
+.env.*
+!.env.example
 **/*.env
+*.pem
+*.key

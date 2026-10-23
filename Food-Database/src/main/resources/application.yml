@@ -5,6 +5,19 @@ spring:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:mongodb+srv://chatgpt2:riten13@cluster0.ioo4yf3.mongodb.net/food_database?appName=Cluster0}
 
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+aws:
+  region: ${AWS_REGION:ap-southeast-2}
+  s3:
+    bucket: ${AWS_S3_BUCKET:nutrition-tracker-food-images-2026-new}
+    prefix: food-images/
+    presigned-url-expiration-minutes: 60
+
 server:
   port: 3000
 

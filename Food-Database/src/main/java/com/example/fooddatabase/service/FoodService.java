@@ -7,15 +7,20 @@ import com.example.fooddatabase.exception.FoodNotFoundException;
 import com.example.fooddatabase.model.Food;
 import com.example.fooddatabase.model.Nutrition;
 import com.example.fooddatabase.repository.FoodRepository;
+import com.example.fooddatabase.exception.InvalidImageException;
+import com.example.fooddatabase.util.ImageValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * FoodService contains all the business logic for managing foods.
+ * FoodService contains all the business logic for managing foods and S3 images.
  *
  * It sits between the Controller (HTTP layer) and the Repository (database layer).
  * It also handles mapping between model objects (Food) and DTOs (FoodRequest / FoodResponse).
@@ -25,8 +30,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FoodService {
 
-    // Spring injects FoodRepository automatically via @RequiredArgsConstructor
     private final FoodRepository foodRepository;
+    private final S3StorageService s3StorageService;
+    private final ImageValidator imageValidator;
 
     // ─────────────────────────────────────────────────────────────
     // 1. Get / Search Foods
@@ -141,16 +147,113 @@ public class FoodService {
     public void deleteFood(String foodId) {
         log.debug("Deleting food with id: {}", foodId);
 
-        // Check food exists before deleting — throw 404 if not found
-        if (!foodRepository.existsById(foodId)) {
-            throw new FoodNotFoundException(foodId);
+        Food food = foodRepository.findById(foodId)
+                .orElseThrow(() -> new FoodNotFoundException(foodId));
+
+        // If food has an associated S3 image, clean it up
+        if (food.getImageKey() != null && !food.getImageKey().isBlank()) {
+            try {
+                s3StorageService.deleteImage(food.getImageKey());
+            } catch (Exception e) {
+                log.warn("Failed to delete S3 image '{}' for food '{}': {}", food.getImageKey(), foodId, e.getMessage());
+            }
         }
 
         foodRepository.deleteById(foodId);
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 6. Get Nutrition
+    // 6. Upload or Replace Food Image
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Uploads or replaces an image for an existing food item.
+     * Validates image content (JPG, PNG, WebP, max 5 MB).
+     * Stores unique key in MongoDB and deletes old image only after successful DB save.
+     * Cleans up newly uploaded image if database update fails.
+     */
+    public FoodResponse uploadFoodImage(String foodId, MultipartFile file) {
+        log.info("Uploading food image for foodId: {}", foodId);
+
+        Food food = foodRepository.findById(foodId)
+                .orElseThrow(() -> new FoodNotFoundException(foodId));
+
+        // 1. Content validation (magic bytes, size <= 5MB)
+        ImageValidator.SupportedFormat format = imageValidator.validate(file);
+
+        // 2. Remember old image key to delete only after successful replacement
+        String oldImageKey = food.getImageKey();
+
+        // 3. Generate unique S3 key under food-images/
+        String newImageKey = "food-images/" + foodId + "_" + UUID.randomUUID() + "." + format.getExtension();
+
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new InvalidImageException("Failed to read image data: " + e.getMessage());
+        }
+
+        // 4. Upload new image to AWS S3
+        s3StorageService.uploadImage(newImageKey, bytes, format.getMimeType());
+
+        // 5. Update MongoDB document with new imageKey
+        try {
+            food.setImageKey(newImageKey);
+            food = foodRepository.save(food);
+            log.info("Successfully updated foodId '{}' with new S3 imageKey '{}'", foodId, newImageKey);
+        } catch (Exception dbEx) {
+            log.error("Database update failed after S3 upload. Cleaning up orphaned S3 object: {}", newImageKey, dbEx);
+            try {
+                s3StorageService.deleteImage(newImageKey);
+            } catch (Exception cleanupEx) {
+                log.error("Failed to clean up S3 object '{}': {}", newImageKey, cleanupEx.getMessage());
+            }
+            throw dbEx;
+        }
+
+        // 6. Database save succeeded! Now clean up old superseded image
+        if (oldImageKey != null && !oldImageKey.isBlank()) {
+            try {
+                s3StorageService.deleteImage(oldImageKey);
+                log.info("Deleted superseded old S3 image '{}' for foodId '{}'", oldImageKey, foodId);
+            } catch (Exception ex) {
+                log.warn("Failed to delete superseded old S3 image '{}': {}", oldImageKey, ex.getMessage());
+            }
+        }
+
+        return toFoodResponse(food);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 7. Delete Food Image
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Deletes the image for a food item and clears the imageKey in MongoDB.
+     */
+    public FoodResponse deleteFoodImage(String foodId) {
+        log.info("Deleting image for foodId: {}", foodId);
+
+        Food food = foodRepository.findById(foodId)
+                .orElseThrow(() -> new FoodNotFoundException(foodId));
+
+        String imageKey = food.getImageKey();
+        if (imageKey != null && !imageKey.isBlank()) {
+            try {
+                s3StorageService.deleteImage(imageKey);
+            } catch (Exception e) {
+                log.warn("S3 delete warning for key '{}': {}", imageKey, e.getMessage());
+            }
+            food.setImageKey(null);
+            food = foodRepository.save(food);
+        }
+
+        return toFoodResponse(food);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 8. Get Nutrition
     // ─────────────────────────────────────────────────────────────
 
     /**
@@ -186,13 +289,21 @@ public class FoodService {
 
     /**
      * Converts a Food model → FoodResponse DTO (for returning to the client).
+     * Automatically generates a temporary presigned GET URL if an imageKey is present.
      */
     private FoodResponse toFoodResponse(Food food) {
+        String presignedUrl = null;
+        if (food.getImageKey() != null && !food.getImageKey().isBlank()) {
+            presignedUrl = s3StorageService.generatePresignedUrl(food.getImageKey());
+        }
+
         return FoodResponse.builder()
                 .id(food.getId())
                 .name(food.getName())
                 .category(food.getCategory())
                 .description(food.getDescription())
+                .imageKey(food.getImageKey())
+                .imageUrl(presignedUrl)
                 .nutrition(food.getNutrition() != null
                         ? toNutritionDto(food.getNutrition())
                         : null)

@@ -1,0 +1,195 @@
+# =============================================================================
+# Nutrition Tracker MSA — Production Docker Compose Configuration
+# Target: Single Ubuntu EC2 Instance (c7i-flex.large, 4 GB RAM, Sydney ap-southeast-2)
+#
+# Production Highlights:
+# - ONLY port 80 is exposed publicly (Nginx serving React SPA + reverse-proxying /api/ to API Gateway).
+# - Eureka Server and internal microservices remain private on the Docker network.
+# - AWS S3 uses EC2 IAM Role (NutritionTrackerEC2Role) via AWS SDK DefaultCredentialsProvider.
+# - Zero static AWS credentials or ~/.aws mounts on EC2.
+# - Memory-tuned for 4 GB RAM: JVM caps + container limits prevent OOM.
+# - Robust healthchecks and service startup orchestration.
+# =============================================================================
+
+networks:
+  nutrition-network:
+    driver: bridge
+
+services:
+  # ===========================================================================
+  # 1. Service Discovery & Registry (Private)
+  # ===========================================================================
+  eureka-server:
+    build:
+      context: ./Eureka-Server
+      dockerfile: Dockerfile
+    container_name: eureka-server
+    restart: unless-stopped
+    mem_limit: 384m
+    mem_reservation: 128m
+    environment:
+      EUREKA_INSTANCE_HOSTNAME: eureka-server
+      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx192m"
+    networks:
+      - nutrition-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ===========================================================================
+  # 2. Core Business Microservices (Private)
+  # ===========================================================================
+  user-profile-service:
+    build:
+      context: ./User-Profile
+      dockerfile: Dockerfile
+    container_name: user-profile-service
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 192m
+    environment:
+      SPRING_DATA_MONGODB_URI: ${USER_PROFILE_MONGODB_URI}
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      JWT_SECRET: ${JWT_SECRET}
+      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - nutrition-network
+
+  food-database-service:
+    build:
+      context: ./Food-Database
+      dockerfile: Dockerfile
+    container_name: food-database-service
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 192m
+    environment:
+      SPRING_DATA_MONGODB_URI: ${FOOD_DB_MONGODB_URI}
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      JWT_SECRET: ${JWT_SECRET}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-2}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-nutrition-tracker-food-images-2026-new}
+      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+    # No ~/.aws volume mount: AWS SDK v2 automatically retrieves IAM role credentials from EC2 IMDSv2
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - nutrition-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/foods"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  meal-planning-service:
+    build:
+      context: ./Meal-Planning
+      dockerfile: Dockerfile
+    container_name: meal-planning-service
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 192m
+    environment:
+      SPRING_DATA_MONGODB_URI: ${MEAL_PLANNING_MONGODB_URI}
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      FOOD_SERVICE_URL: http://food-database-service:3000
+      JWT_SECRET: ${JWT_SECRET}
+      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      food-database-service:
+        condition: service_healthy
+    networks:
+      - nutrition-network
+
+  grocery-planning-service:
+    build:
+      context: ./Grocery-Planning
+      dockerfile: Dockerfile
+    container_name: grocery-planning-service
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 192m
+    environment:
+      SPRING_DATA_MONGODB_URI: ${GROCERY_PLANNING_MONGODB_URI}
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      FOOD_SERVICE_URL: http://food-database-service:3000
+      JWT_SECRET: ${JWT_SECRET}
+      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      food-database-service:
+        condition: service_healthy
+    networks:
+      - nutrition-network
+
+  # ===========================================================================
+  # 3. API Gateway Router (Private - proxied by Nginx frontend)
+  # ===========================================================================
+  api-gateway:
+    build:
+      context: ./API-Gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 192m
+    environment:
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      user-profile-service:
+        condition: service_started
+      food-database-service:
+        condition: service_healthy
+      meal-planning-service:
+        condition: service_started
+      grocery-planning-service:
+        condition: service_started
+    networks:
+      - nutrition-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/swagger-ui.html"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  # ===========================================================================
+  # 4. Frontend & Reverse Proxy (Public Entrypoint - ONLY Port 80 exposed)
+  # ===========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: nutrition-frontend
+    restart: unless-stopped
+    mem_limit: 128m
+    mem_reservation: 32m
+    ports:
+      - "80:80"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - nutrition-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

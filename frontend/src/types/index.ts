@@ -39,6 +39,7 @@ export interface UserProfileResponse {
   allergies?: AllergyDto[];
   dietaryPreference?: DietaryPreferenceDto;
   nutritionGoal?: NutritionGoalDto;
+  role?: string;
 }
 
 export interface LoginRequest {
@@ -89,6 +90,8 @@ export interface FoodResponse {
   name: string;
   category: string;
   description?: string;
+  imageKey?: string;
+  imageUrl?: string;
   nutrition: NutritionDto;
 }
 

@@ -39,9 +39,9 @@ public class SecurityConfig {
                     "/actuator/**"
                 ).permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/foods/**").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/foods/**").hasRole("ADMIN")
-                .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/foods/**").hasRole("ADMIN")
-                .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/foods/**").hasRole("ADMIN")
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/foods/**").hasAnyRole("ADMIN", "USER")
+                .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/foods/**").hasAnyRole("ADMIN", "USER")
+                .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/api/foods/**").hasAnyRole("ADMIN", "USER")
                 .anyRequest().authenticated()
             );
 

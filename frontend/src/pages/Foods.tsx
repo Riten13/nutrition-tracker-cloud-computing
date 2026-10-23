@@ -13,6 +13,10 @@ import {
   ShoppingCart,
   Loader2,
   Check,
+  Camera,
+  Image as ImageIcon,
+  Upload,
+  Utensils,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { foodService } from '../services/foodService';
@@ -28,7 +32,26 @@ import { Modal } from '../components/ui/Modal';
 import { Alert } from '../components/ui/Alert';
 
 export const Foods: React.FC = () => {
-  const { user, isDemoMode } = useAuth();
+  const { user, token, isDemoMode } = useAuth();
+
+  // Determine if the current authenticated user has administrative privileges
+  const isAdmin = useMemo(() => {
+    if (user?.role === 'ROLE_ADMIN' || user?.role === 'ADMIN') return true;
+    if (token && token.includes('.')) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.role === 'ROLE_ADMIN' || payload.role === 'ADMIN') return true;
+      } catch {
+        // malformed token
+      }
+    }
+    return false;
+  }, [user, token]);
+
+  // All authenticated users can manage foods and images
+  const canManageFoods = useMemo(() => {
+    return !!user || isDemoMode;
+  }, [user, isDemoMode]);
 
   const [foods, setFoods] = useState<FoodResponse[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,6 +67,14 @@ export const Foods: React.FC = () => {
   const [isAddToMealOpen, setIsAddToMealOpen] = useState(false);
   const [isAddToGroceryOpen, setIsAddToGroceryOpen] = useState(false);
   const [targetFood, setTargetFood] = useState<FoodResponse | null>(null);
+
+  // Image Upload Modal states
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [imageTargetFood, setImageTargetFood] = useState<FoodResponse | null>(null);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
 
   // Form states for Food Creation/Editing
   const [foodFormName, setFoodFormName] = useState('');
@@ -147,6 +178,110 @@ export const Foods: React.FC = () => {
     setFoodFormFat(food.nutrition?.fat || 0);
     setFoodFormFiber(food.nutrition?.fiber || 0);
     setIsEditFoodOpen(true);
+  };
+
+  const openImageModal = (food: FoodResponse) => {
+    setImageTargetFood(food);
+    setSelectedImageFile(null);
+    setImagePreviewUrl(food.imageUrl || null);
+    setImageUploadError(null);
+    setIsImageModalOpen(true);
+  };
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageUploadError(null);
+
+    // Validate type (JPG, PNG, WebP)
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    const validExtensions = /\.(jpe?g|png|webp)$/i;
+    if (!validMimes.includes(file.type) && !validExtensions.test(file.name)) {
+      setImageUploadError('Invalid format. Only JPG, PNG, and WebP images are allowed.');
+      return;
+    }
+
+    // Validate size (max 5 MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setImageUploadError(
+        `File size (${(file.size / (1024 * 1024)).toFixed(1)} MB) exceeds maximum allowed limit of 5 MB.`
+      );
+      return;
+    }
+
+    setSelectedImageFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setImagePreviewUrl(objectUrl);
+  };
+
+  const handleUploadImage = async () => {
+    if (!imageTargetFood || !selectedImageFile) return;
+
+    setIsUploadingImage(true);
+    setImageUploadError(null);
+
+    try {
+      if (isDemoMode) {
+        const updatedFood: FoodResponse = {
+          ...imageTargetFood,
+          imageKey: `food-images/demo-${Date.now()}`,
+          imageUrl: imagePreviewUrl || undefined,
+        };
+        setFoods((prev) => prev.map((f) => (f.id === updatedFood.id ? updatedFood : f)));
+        setActionSuccess(`Simulated image upload for "${imageTargetFood.name}" in demo mode.`);
+        setIsImageModalOpen(false);
+      } else {
+        const updatedFood = await foodService.uploadFoodImage(imageTargetFood.id, selectedImageFile);
+        setFoods((prev) => prev.map((f) => (f.id === updatedFood.id ? updatedFood : f)));
+        setActionSuccess(`Image uploaded to S3 and linked to "${imageTargetFood.name}".`);
+        setIsImageModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error('Food image upload failed:', err);
+      setImageUploadError(
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to upload image to S3 bucket. Verify AWS credentials and permissions.'
+      );
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleDeleteImage = async () => {
+    if (!imageTargetFood) return;
+    if (!window.confirm(`Are you sure you want to delete the image for "${imageTargetFood.name}" from S3?`)) return;
+
+    setIsUploadingImage(true);
+    setImageUploadError(null);
+
+    try {
+      if (isDemoMode) {
+        const updatedFood: FoodResponse = {
+          ...imageTargetFood,
+          imageKey: undefined,
+          imageUrl: undefined,
+        };
+        setFoods((prev) => prev.map((f) => (f.id === updatedFood.id ? updatedFood : f)));
+        setActionSuccess(`Image removed for "${imageTargetFood.name}" in demo mode.`);
+        setIsImageModalOpen(false);
+      } else {
+        const updatedFood = await foodService.deleteFoodImage(imageTargetFood.id);
+        setFoods((prev) => prev.map((f) => (f.id === updatedFood.id ? updatedFood : f)));
+        setActionSuccess(`Image removed from Amazon S3 for "${imageTargetFood.name}".`);
+        setIsImageModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error('Food image delete failed:', err);
+      setImageUploadError(
+        err.response?.data?.message ||
+        err.message ||
+        'Failed to delete image from S3.'
+      );
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const handleSaveFood = async (e: React.FormEvent) => {
@@ -316,22 +451,28 @@ export const Foods: React.FC = () => {
             Food & Nutrition Master Database
           </h2>
           <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-0.5">
-            Master records provided by Food Database Service (Port 3000 via Gateway 8088).
+            Master records stored in MongoDB Atlas with food imagery backed by Amazon S3.
           </p>
         </div>
 
-        <Button
-          onClick={openCreateModal}
-          leftIcon={<Plus className="w-4 h-4" />}
-          className="self-start sm:self-auto"
-        >
-          Add Food Item
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {isAdmin && (
+            <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              Admin Mode
+            </span>
+          )}
+          <Button
+            onClick={openCreateModal}
+            leftIcon={<Plus className="w-4 h-4" />}
+          >
+            Add Food Item
+          </Button>
+        </div>
       </div>
 
       {isDemoMode && (
         <div className="text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 p-3 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center justify-between">
-          <span>⚠️ <strong>Demo Mode Active:</strong> Displaying simulated food items. Any added foods are not saved to the Food Database microservice.</span>
+          <span>⚠️ <strong>Demo Mode Active:</strong> Displaying simulated food items and images. Added foods or image uploads will update local state only.</span>
         </div>
       )}
 
@@ -412,23 +553,77 @@ export const Foods: React.FC = () => {
           </Button>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {foods.map((food) => (
             <Card
               key={food.id}
-              className="flex flex-col justify-between hover:border-stone-300 dark:hover:border-stone-700 transition-colors"
+              className="flex flex-col justify-between overflow-hidden hover:border-stone-300 dark:hover:border-stone-700 transition-colors shadow-sm"
             >
+              {/* Food Image Banner with Placeholder & Admin Overlay */}
+              <div className="relative h-44 w-full overflow-hidden bg-stone-100 dark:bg-stone-800/80 flex items-center justify-center border-b border-stone-100 dark:border-stone-800">
+                {food.imageUrl ? (
+                  <img
+                    src={food.imageUrl}
+                    alt={food.name}
+                    className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                      const placeholder = (e.target as HTMLElement).nextElementSibling;
+                      if (placeholder) (placeholder as HTMLElement).classList.remove('hidden');
+                    }}
+                  />
+                ) : null}
+                <div
+                  className={`w-full h-full flex flex-col items-center justify-center text-stone-400 dark:text-stone-500 bg-gradient-to-br from-stone-50 to-stone-100 dark:from-stone-900/60 dark:to-stone-800/60 ${
+                    food.imageUrl ? 'hidden' : 'flex'
+                  }`}
+                >
+                  <Utensils className="w-8 h-8 mb-1.5 opacity-30 text-stone-500" />
+                  <span className="text-xs font-medium text-stone-400 dark:text-stone-500">No image available</span>
+                </div>
+
+                {/* Category Pill over image */}
+                <div className="absolute top-2.5 left-2.5">
+                  <Badge variant="lime" className="shadow-sm backdrop-blur-md bg-white/95 dark:bg-stone-900/95 font-medium">
+                    {food.category}
+                  </Badge>
+                </div>
+
+                {/* Image Control over image */}
+                {canManageFoods && (
+                  <button
+                    onClick={() => openImageModal(food)}
+                    className="absolute top-2.5 right-2.5 px-2 py-1 rounded-md bg-stone-900/80 hover:bg-stone-900 text-white text-[11px] font-medium backdrop-blur-md transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    title="Upload or change image"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{food.imageUrl ? 'Change' : 'Upload'}</span>
+                  </button>
+                )}
+              </div>
+
               <CardHeader className="p-4 pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <CardTitle className="text-base font-semibold">
                       {food.name}
                     </CardTitle>
-                    <Badge variant="lime" className="mt-1">
-                      {food.category}
-                    </Badge>
+                    {food.imageKey && (
+                      <span className="text-[10px] text-stone-400 font-mono flex items-center gap-1 mt-0.5">
+                        <Check className="w-2.5 h-2.5 text-emerald-500 inline" /> S3 Stored
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1">
+                    {canManageFoods && (
+                      <button
+                        onClick={() => openImageModal(food)}
+                        className="p-1.5 text-stone-400 hover:text-emerald-600 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+                        title="Upload/Manage image"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       onClick={() => openEditModal(food)}
                       className="p-1.5 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 rounded-md hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
@@ -495,6 +690,9 @@ export const Foods: React.FC = () => {
                   <span>
                     Per {food.nutrition?.servingSize ?? 100}
                     {food.nutrition?.servingUnit ?? 'g'}
+                    {food.nutrition?.servingWeightGrams && food.nutrition?.servingUnit !== 'g'
+                      ? ` (${food.nutrition.servingWeightGrams}g)`
+                      : ''}
                   </span>
                   {food.nutrition?.fiber !== undefined && (
                     <span>Fiber: {food.nutrition.fiber}g</span>
@@ -780,6 +978,133 @@ export const Foods: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Modal 4: Manage Food Image */}
+      <Modal
+        isOpen={isImageModalOpen}
+        onClose={() => {
+          if (!isUploadingImage) {
+            setIsImageModalOpen(false);
+            setImageTargetFood(null);
+            setSelectedImageFile(null);
+            setImagePreviewUrl(null);
+            setImageUploadError(null);
+          }
+        }}
+        title={`Manage Food Image: ${imageTargetFood?.name || ''}`}
+        description="Upload a photo (JPG, PNG, WebP — max 5 MB). The image binary is securely stored in Amazon S3 and served via temporary presigned URLs."
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          {imageUploadError && (
+            <Alert type="error" onClose={() => setImageUploadError(null)}>
+              {imageUploadError}
+            </Alert>
+          )}
+
+          {/* Image Preview Box */}
+          <div className="rounded-xl border border-stone-200 dark:border-stone-800 overflow-hidden bg-stone-50 dark:bg-stone-900 flex flex-col items-center justify-center p-4">
+            {imagePreviewUrl ? (
+              <div className="relative w-full max-h-64 flex items-center justify-center overflow-hidden rounded-lg">
+                <img
+                  src={imagePreviewUrl}
+                  alt="Preview"
+                  className="max-h-64 w-auto object-contain rounded-lg shadow-sm"
+                />
+              </div>
+            ) : (
+              <div className="py-10 text-center text-stone-400 dark:text-stone-500">
+                <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-40 text-stone-400" />
+                <p className="text-xs font-medium">No image currently assigned</p>
+                <p className="text-[11px] text-stone-400 mt-0.5">Select a photo below to preview and upload to S3.</p>
+              </div>
+            )}
+
+            {selectedImageFile && (
+              <div className="mt-3 text-xs text-stone-500 dark:text-stone-400 flex items-center gap-2">
+                <span className="font-semibold text-stone-700 dark:text-stone-300">{selectedImageFile.name}</span>
+                <span>({(selectedImageFile.size / (1024 * 1024)).toFixed(2)} MB)</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedImageFile(null);
+                    setImagePreviewUrl(imageTargetFood?.imageUrl || null);
+                  }}
+                  className="text-rose-500 hover:text-rose-700 text-xs underline cursor-pointer ml-1"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* File Input Selection */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
+              Choose Image File (JPG, PNG, WebP — Max 5 MB)
+            </label>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleImageFileChange}
+              disabled={isUploadingImage}
+              className="w-full text-xs text-stone-600 dark:text-stone-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#1b3b2b] file:text-white hover:file:bg-[#2d5f47] file:cursor-pointer border border-stone-200 dark:border-stone-800 rounded-lg p-1.5 bg-white dark:bg-stone-900"
+            />
+            <p className="text-[11px] text-stone-400 mt-1">
+              Images are validated by binary magic bytes and stored in private S3 bucket{' '}
+              <code className="text-[10px] bg-stone-100 dark:bg-stone-800 px-1 py-0.5 rounded font-mono">
+                nutrition-tracker-food-images-2026-new
+              </code>
+              . S3 object key is saved to MongoDB.
+            </p>
+          </div>
+
+          {/* Modal Actions */}
+          <div className="flex items-center justify-between pt-3 border-t border-stone-100 dark:border-stone-800">
+            <div>
+              {imageTargetFood?.imageKey && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs"
+                  onClick={handleDeleteImage}
+                  isLoading={isUploadingImage}
+                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                >
+                  Remove S3 Image
+                </Button>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isUploadingImage}
+                onClick={() => {
+                  setIsImageModalOpen(false);
+                  setImageTargetFood(null);
+                  setSelectedImageFile(null);
+                  setImagePreviewUrl(null);
+                  setImageUploadError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!selectedImageFile || isUploadingImage}
+                isLoading={isUploadingImage}
+                onClick={handleUploadImage}
+                leftIcon={<Upload className="w-4 h-4" />}
+              >
+                {imageTargetFood?.imageKey ? 'Replace Image' : 'Upload Image'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
+

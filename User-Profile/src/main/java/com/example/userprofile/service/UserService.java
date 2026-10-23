@@ -72,6 +72,7 @@ public class UserService {
                 .allergies(allergyDtos)
                 .dietaryPreference(prefDto)
                 .nutritionGoal(goalDto)
+                .role(user.getRole())
                 .build();
     }
 

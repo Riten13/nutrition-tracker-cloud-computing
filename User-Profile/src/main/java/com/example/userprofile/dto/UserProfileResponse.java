@@ -19,4 +19,5 @@ public class UserProfileResponse {
     private List<AllergyDto> allergies;
     private DietaryPreferenceDto dietaryPreference;
     private NutritionGoalDto nutritionGoal;
+    private String role;
 }

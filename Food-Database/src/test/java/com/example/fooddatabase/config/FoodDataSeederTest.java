@@ -84,5 +84,34 @@ class FoodDataSeederTest {
 
         verify(foodRepository, never()).save(any(Food.class));
     }
+
+    @Test
+    @DisplayName("FoodDataSeeder preserves existing imageKey when updating food")
+    void run_preservesExistingImageKey() {
+        Food existingFoodWithImage = Food.builder()
+                .name("Whole Wheat Roti (Chapati)")
+                .imageKey("food-images/roti_custom_key_123.jpg")
+                .nutrition(Nutrition.builder().servingWeightGrams(null).build())
+                .build();
+
+        when(foodRepository.findByNameIgnoreCase(eq("Whole Wheat Roti (Chapati)")))
+                .thenReturn(Optional.of(existingFoodWithImage));
+
+        // Other foods exist with portions
+        Food fullyConfigured = Food.builder()
+                .name("Other Food")
+                .nutrition(Nutrition.builder().servingWeightGrams(100.0).build())
+                .build();
+        when(foodRepository.findByNameIgnoreCase(argThat(name -> !name.equals("Whole Wheat Roti (Chapati)"))))
+                .thenReturn(Optional.of(fullyConfigured));
+
+        foodDataSeeder.run();
+
+        // Verify save was called and imageKey was preserved
+        verify(foodRepository).save(argThat(f ->
+                f.getName().equals("Whole Wheat Roti (Chapati)") &&
+                "food-images/roti_custom_key_123.jpg".equals(f.getImageKey())
+        ));
+    }
 }
 

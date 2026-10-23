@@ -1,3 +1,10 @@
 app:
   jwt:
     secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+
+aws:
+  region: ap-southeast-2
+  s3:
+    bucket: test-nutrition-tracker-food-images
+    prefix: food-images/
+    presigned-url-expiration-minutes: 60

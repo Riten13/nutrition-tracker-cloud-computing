@@ -187,4 +187,63 @@ public class FoodController {
         NutritionDto nutrition = foodService.getNutrition(foodId);
         return ResponseEntity.ok(nutrition);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // POST /api/foods/{foodId}/image
+    // ─────────────────────────────────────────────────────────────
+
+    @Operation(
+            summary = "Upload or Replace Food Image",
+            description = "Uploads a JPG, PNG, or WebP image (max 5MB) for an existing food item. Requires ROLE_USER or ROLE_ADMIN. Returns updated food with presigned image URL."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Image uploaded successfully",
+                    content = @Content(schema = @Schema(implementation = FoodResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid image content or size", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Unauthorized - Missing or invalid JWT", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Forbidden - Requires authenticated user (ROLE_USER or ROLE_ADMIN)", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Food not found", content = @Content)
+    })
+    @PostMapping(value = "/{foodId}/image", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<FoodResponse> uploadFoodImage(
+            @Parameter(description = "The ID of the food")
+            @PathVariable String foodId,
+            @Parameter(description = "Image file (JPG, PNG, WebP, max 5 MB)")
+            @RequestParam(value = "image", required = false) org.springframework.web.multipart.MultipartFile image,
+            @RequestParam(value = "file", required = false) org.springframework.web.multipart.MultipartFile file) {
+
+        org.springframework.web.multipart.MultipartFile uploadFile = (image != null) ? image : file;
+        if (uploadFile == null) {
+            throw new com.example.fooddatabase.exception.InvalidImageException("Image file parameter ('image' or 'file') is required.");
+        }
+
+        log.info("POST /api/foods/{}/image - filename={}, size={}", foodId, uploadFile.getOriginalFilename(), uploadFile.getSize());
+        FoodResponse response = foodService.uploadFoodImage(foodId, uploadFile);
+        return ResponseEntity.ok(response);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // DELETE /api/foods/{foodId}/image
+    // ─────────────────────────────────────────────────────────────
+
+    @Operation(
+            summary = "Delete Food Image",
+            description = "Deletes the S3 image associated with a food item. Requires ROLE_USER or ROLE_ADMIN."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Image removed successfully",
+                    content = @Content(schema = @Schema(implementation = FoodResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Unauthorized - Missing or invalid JWT", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Forbidden - Requires authenticated user (ROLE_USER or ROLE_ADMIN)", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Food not found", content = @Content)
+    })
+    @DeleteMapping("/{foodId}/image")
+    public ResponseEntity<FoodResponse> deleteFoodImage(
+            @Parameter(description = "The ID of the food")
+            @PathVariable String foodId) {
+
+        log.info("DELETE /api/foods/{}/image", foodId);
+        FoodResponse response = foodService.deleteFoodImage(foodId);
+        return ResponseEntity.ok(response);
+    }
 }

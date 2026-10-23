@@ -34,6 +34,7 @@ export const mockUser: UserProfileResponse = {
     carbTarget: 240,
     fatTarget: 65,
   },
+  role: 'ROLE_ADMIN',
 };
 
 export const mockFoods: FoodResponse[] = [

@@ -27,4 +27,7 @@ public class Food {
 
     // Nutrition is embedded inside the food document (NOT a separate collection)
     private Nutrition nutrition;
+
+    // S3 object key for the food image (e.g., "food-images/food123_abc.jpg")
+    private String imageKey;
 }

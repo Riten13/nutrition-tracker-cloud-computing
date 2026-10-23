@@ -1,7 +1,7 @@
 # 🥗 Nutrition Tracker — Comprehensive Microservices Architecture Guide
 
 > **System Deep-Dive & Service Specification**  
-> **Platform Stack:** Java 21 • Spring Boot 3.3.x • Spring Cloud 2023.0.3 (Eureka, Gateway, OpenFeign) • MongoDB NoSQL • React 19 + Vite • Docker Compose
+> **Platform Stack:** Java 21 • Spring Boot 3.3.x • Spring Cloud 2023.0.3 (Eureka, Gateway, OpenFeign) • Amazon S3 (AWS SDK for Java v2) • MongoDB NoSQL • React 19 + Vite • Docker Compose
 
 ---
 
@@ -14,27 +14,31 @@
 4. [Core Business Microservices](#4-core-business-microservices)
    - [User Profile Service (Port 8080)](#41-user-profile-service-auth--identity)
    - [Food Database Service (Port 3000)](#42-food-database-service-master-data)
+     - [Amazon S3 Image Storage Engine & Presigned URLs](#amazon-s3-food-image-storage-engine)
+     - [Catalog Modification Privileges (ROLE_USER & ROLE_ADMIN)](#4-access-control-and-permissions)
    - [Meal Planning Service (Port 3001)](#43-meal-planning-service-nutrition-engine)
    - [Grocery Planning Service (Port 3002)](#44-grocery-planning-service-cost-estimation)
 5. [Frontend Client Application (Port 5173)](#5-frontend-client-application)
 6. [Database Layer: Unified MongoDB Architecture](#6-database-layer-unified-mongodb-architecture)
 7. [End-to-End Request Lifecycles](#7-end-to-end-request-lifecycles)
-8. [Docker Containerization & Memory Optimization](#8-docker-containerization--memory-optimization)
+   - [Flow E: S3 Food Image Upload & Presigned URL Resolution](#flow-e-s3-food-image-upload--presigned-url-resolution)
+8. [Docker Containerization, AWS Credentials & Memory Optimization](#8-docker-containerization-aws-credentials--memory-optimization)
 9. [Future Roadmap: Integrating AI via OpenRouter](#9-future-roadmap-integrating-ai-via-openrouter)
 
 ---
 
 ## 1. Architectural Overview & Philosophy
 
-The **Nutrition Tracker Platform** is engineered following modern **Microservices Architecture (MSA)** principles. Instead of a monolithic codebase where all business domains, persistence logic, and web handlers are coupled together, the system is decomposed into **four domain-focused microservices** supported by **two infrastructure services** and a **React single-page application (SPA)**.
+The **Nutrition Tracker Platform** is engineered following modern **Microservices Architecture (MSA)** principles. Instead of a monolithic codebase where all business domains, persistence logic, and web handlers are coupled together, the system is decomposed into **four domain-focused microservices** supported by **two infrastructure services**, **Amazon S3 Cloud Object Storage**, and a **React single-page application (SPA)**.
 
 ### Core Architectural Principles:
 1. **Single Responsibility Principle (SRP)**: Each service owns exactly one domain (Identity & Goals, Food Master Data & Portions, Meal Tracking & History, Grocery Planning).
 2. **Database-per-Service Pattern**: No microservice directly queries the database of another microservice. Data ownership is strict.
 3. **Decoupled Inter-Service Communication**: Microservices communicate over HTTP REST using **Spring Cloud OpenFeign** with dynamic instance resolution via **Eureka Service Discovery**.
-4. **Data Normalization across Services**: Business services (Meal Planning & Grocery Planning) store only lightweight foreign references (`foodId`) and query the Food Database on demand, avoiding stale data and duplication.
-5. **Centralized Entry Point**: The client never communicates directly with backend microservices; all traffic passes through the **Spring Cloud API Gateway**.
-6. **Stateless Security Propagation**: Authentication uses digitally signed HMAC-SHA256 JWT tokens. Gateway routes forward the `Authorization: Bearer <token>` header downstream, and OpenFeign clients propagate tokens via request interceptors.
+4. **Cloud Object Storage Separation**: Binary image files are never stored in MongoDB or service local disks. All food imagery is stored in **Amazon S3**, keeping MongoDB lightweight (storing only string object keys) and serving images via secure, short-lived presigned URLs.
+5. **Decoupled Access Permissions**: Food catalog write privileges are open to all authenticated users (`ROLE_USER` and `ROLE_ADMIN`) while keeping unauthenticated access read-only and requiring authentication for all mutations.
+6. **Centralized Entry Point**: The client never communicates directly with backend microservices; all traffic passes through the **Spring Cloud API Gateway**.
+7. **Stateless Security Propagation**: Authentication uses digitally signed HMAC-SHA JWT tokens. Gateway routes forward the `Authorization: Bearer <token>` header downstream, and OpenFeign clients propagate tokens via request interceptors.
 
 ---
 
@@ -70,12 +74,20 @@ The **Nutrition Tracker Platform** is engineered following modern **Microservice
 │ User Profile  │        │  Food Database   │        │  Meal Planning   │       │  Grocery Planning  │
 │  (Port 8080)  │        │   (Port 3000)    │        │   (Port 3001)    │       │    (Port 3002)     │
 │ [Goals & Sec] │        │ [Portion Master] │        │ [History Engine] │       │ [Cost Estimation]  │
-└───────┬───────┘        └────────▲─────────┘        └────────┬─────────┘       └─────────┬──────────┘
-        │                         │                           │                           │
-        │                         │  OpenFeign (lb://)        │  OpenFeign (lb://)        │
-        │                         ├───────────────────────────┘                           │
-        │                         │                                                       │
-        │                         └───────────────────────────────────────────────────────┘
+└───────┬───────┘        └─────┬──────▲─────┘        └────────┬─────────┘       └─────────┬──────────┘
+        │                      │      │  OpenFeign (lb://)    │                           │
+        │      AWS SDK v2 (S3) │      ├───────────────────────┘                           │
+        │                      │      │                                                   │
+        │                      │      └───────────────────────────────────────────────────┘
+        │                      ▼
+        │             ┌──────────────────────────────────────────────────┐
+        │             │             Amazon S3 Object Storage             │
+        │             │   Bucket: nutrition-tracker-food-images-2026-new │
+        │             │   Region: ap-southeast-2                         │
+        │             │   Prefix: food-images/                           │
+        │             │   • Private Bucket (No Public Access)            │
+        │             │   • 60-Minute Signed GET URLs via S3Presigner    │
+        │             └──────────────────────────────────────────────────┘
         ▼                                                     ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                                   MongoDB Data Tier                                    │
@@ -195,10 +207,11 @@ Manages customer accounts, authentication, physical biometrics (age, gender, hei
 ### 4.2 Food Database Service (Master Data & Portion Weights)
 - **Port:** `3000`
 - **Database:** MongoDB (`food_database` / `foods` collection)
+- **Object Storage:** Amazon S3 (`nutrition-tracker-food-images-2026-new`)
 - **Primary Package:** `com.example.fooddatabase`
 
 #### What It Does:
-Acts as the **single source of truth** for food items, nutritional values, and **serving portion weight conversions** (e.g. roti = 35g, boiled egg = 50g, dal bowl = 180g).
+Acts as the **single source of truth** for food items, nutritional values, **serving portion weight conversions** (e.g. roti = 35g, boiled egg = 50g, dal bowl = 180g), and **food imagery stored securely in Amazon S3**.
 
 #### How It Works (Internal Mechanics):
 1. **Standardized Nutrition + Portion Unit Conversions**:
@@ -209,9 +222,18 @@ Acts as the **single source of truth** for food items, nutritional values, and *
    - Idempotently enriches existing entries with missing `servingWeightGrams` data without duplicate insertion.
 3. **Search & Filter Pipeline**:
    - `FoodRepository` exposes Spring Data MongoDB methods with Regex matching (`findByCategoryIgnoreCase`, `findByNameContainingIgnoreCase`) for instant catalog searching.
-4. **Role-Based Access Control**:
-   - Read endpoints (`GET /api/foods/**`) are public for fast client access and inter-service Feign calls.
-   - Mutating operations (`POST`, `PUT`, `DELETE`) require `ROLE_ADMIN` authority in the JWT.
+4. **Access Control and Permissions (`SecurityConfig.java`)**:
+   - Public read operations (`GET /api/foods/**`): Anyone, including unauthenticated visitors and inter-service Feign clients, can read food catalog data without a JWT.
+   - Catalog management (`POST`, `PUT`, `DELETE`): Protected by Spring Security with `.hasAnyRole("ADMIN", "USER")`. All authenticated users have full access to add new foods, edit existing items, and delete catalog entries without needing elevated administrator rights. Unauthenticated requests are rejected with `401 Unauthorized`.
+5. **Amazon S3 Food Image Storage Engine**:
+   - **AWS SDK for Java v2**: Integrates `software.amazon.awssdk:s3:2.25.16` (`S3Client` and `S3Presigner`).
+   - **Private Bucket Isolation**: The bucket (`nutrition-tracker-food-images-2026-new` in region `ap-southeast-2`) has AWS S3 Block Public Access enabled. Raw object URLs cannot be read without cryptographic signing.
+   - **Unique Object Keying**: Stored under prefix `food-images/` using the template `food-images/{foodId}_{UUID}.{ext}`, preventing filename clashes and overwrites.
+   - **MIME Magic-Bytes Validation (Apache Tika)**: Verifies the actual file binary signatures (magic bytes) to guarantee only authentic JPEG (`FF D8 FF`), PNG (`89 50 4E 47`), and WebP (`52 49 46 46`) files under 5 MB are accepted. Spoofed file extensions (e.g., `.exe` renamed to `.jpg`) are rejected with `400 Bad Request`.
+   - **Storage Decoupling**: MongoDB stores only the lightweight string key `imageKey` in the `Food` document (never image bytes).
+   - **Temporary Presigned GET URLs**: When foods are queried via API, `S3Presigner` generates a temporary pre-signed URL valid for **60 minutes** (`3600 seconds`) allowing the browser to stream the image directly from AWS S3.
+   - **S3 Cleanup Lifecycle**: When a food item is deleted or its image is replaced, the service dispatches an `s3Client.deleteObject` call to automatically delete the orphaned image from S3.
+   - **Local & Cloud AWS Authentication**: In local Docker development, the container mounts `${USERPROFILE}/.aws` read-only and uses `AWS_PROFILE=nutrition-dev`. The AWS SDK Default Credentials Provider Chain automatically falls back to EC2 IAM Role instance metadata in production with zero code changes.
 
 #### Data Model (`Food.java`):
 ```json
@@ -220,6 +242,8 @@ Acts as the **single source of truth** for food items, nutritional values, and *
   "name": "Whole Wheat Roti / Chapati",
   "category": "Grains",
   "description": "Traditional Indian flatbread made of whole wheat flour cooked on a tawa",
+  "imageKey": "food-images/67b5e4f201a9b_7d428bf1-2cfb-4a3d-b2a1-e94d8cb8e04b.png",
+  "imageUrl": "https://nutrition-tracker-food-images-2026-new.s3.ap-southeast-2.amazonaws.com/food-images/67b5e4f201a9b_7d428bf1-2cfb-4a3d-b2a1-e94d8cb8e04b.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=...",
   "nutrition": {
     "servingSize": 1.0,
     "servingUnit": "piece",
@@ -239,11 +263,13 @@ Acts as the **single source of truth** for food items, nutritional values, and *
 | Method | Endpoint | Description | Auth / Role |
 |:---|:---|:---|:---:|
 | `GET` | `/api/foods` | List all foods (supports `?name=` and `?category=`) | Public |
-| `GET` | `/api/foods/{foodId}` | Fetch single food item with full nutrition and portion data | Public |
-| `GET` | `/api/foods/{foodId}/nutrition` | Inter-service endpoint returning only nutrition | Public |
-| `POST` | `/api/foods` | Add a new food item to catalog | `ROLE_ADMIN` |
-| `PUT` | `/api/foods/{foodId}` | Update an existing food item | `ROLE_ADMIN` |
-| `DELETE` | `/api/foods/{foodId}` | Remove a food item from catalog | `ROLE_ADMIN` |
+| `GET` | `/api/foods/{foodId}` | Fetch single food item with full nutrition, portion data, and presigned image URL | Public |
+| `GET` | `/api/foods/{foodId}/nutrition` | Inter-service Feign endpoint returning nutrition macros | Public |
+| `POST` | `/api/foods` | Add a new food item to catalog | `ROLE_USER` or `ROLE_ADMIN` |
+| `PUT` | `/api/foods/{foodId}` | Update an existing food item | `ROLE_USER` or `ROLE_ADMIN` |
+| `DELETE` | `/api/foods/{foodId}` | Remove a food item from catalog and cleans up S3 image | `ROLE_USER` or `ROLE_ADMIN` |
+| `POST` | `/api/foods/{foodId}/image` | Upload or replace S3 food photo (JPG, PNG, WebP ≤ 5 MB) | `ROLE_USER` or `ROLE_ADMIN` |
+| `DELETE` | `/api/foods/{foodId}/image` | Delete S3 image and clear `imageKey` from food record | `ROLE_USER` or `ROLE_ADMIN` |
 
 ---
 
@@ -378,7 +404,10 @@ Allows users to maintain active grocery shopping lists, tick off purchased items
   - Allergy and dietary preference checklists.
   - **Mifflin-St Jeor Target Calculator**: Provides estimated baseline TDEE targets based on physical metrics, paired with a non-medical advice disclaimer. All targets remain user-editable before saving.
 - **`Foods.tsx`**:
-  - Live searchable food catalog displaying serving sizes and portion conversion weights alongside 100g nutritional facts.
+  - Live searchable and category-filtered master food catalog displaying serving sizes, portion conversion weights, and 100g nutritional facts.
+  - **Amazon S3 Image Integration**: Renders food photos directly from temporary presigned S3 URLs with automatic graceful fallback to placeholder artwork.
+  - **Image Management Modal**: Allows users to preview and upload JPG, PNG, or WebP images (max 5 MB) directly to S3.
+  - **Accessible Catalog Controls**: Authenticated users can add new foods, edit existing records, delete foods, and upload/replace/remove S3 food photos directly without needing dedicated admin role elevation.
 - **`GroceryPlanning.tsx`**:
   - Interactive checklist with real-time bill calculations and item check-offs.
 - **API Service Layer (`/src/services`)**:
@@ -490,24 +519,56 @@ The entire ecosystem operates on a **pure MongoDB NoSQL architecture**:
 
 ---
 
-## 8. Docker Containerization & Memory Optimization
+### Flow E: S3 Food Image Upload & Presigned URL Resolution
+1. User selects an image file (e.g., `oatmeal.png`) and clicks **Upload Image** in `Foods.tsx`.
+2. Frontend sends a `multipart/form-data` POST request to `http://localhost:8088/api/foods/{foodId}/image` with the Bearer JWT token.
+3. **API Gateway** proxies the multipart payload directly to `FOOD-DATABASE-SERVICE`.
+4. `FoodImageService`:
+   - Checks that the file is not empty and is under 5 MB.
+   - Inspects the raw file magic bytes with **Apache Tika** to verify that the binary content is strictly `image/jpeg`, `image/png`, or `image/webp`.
+   - Generates an immutable S3 key: `food-images/{foodId}_{uuid}.png`.
+   - If the food already had an existing image, calls `s3Client.deleteObject` to clean up the obsolete file in S3.
+   - Streams the binary bytes directly to the private S3 bucket `nutrition-tracker-food-images-2026-new` with metadata `contentType`.
+   - Updates the MongoDB `Food` document with `imageKey = "food-images/{foodId}_{uuid}.png"`.
+   - Generates a **60-minute presigned GET URL** using AWS SDK v2 `S3Presigner`.
+5. Returns `200 OK` with the updated `FoodResponse` containing the temporary `imageUrl`.
+6. Frontend immediately displays the photo inside the food card without requiring a page refresh.
 
-The entire ecosystem runs with a single command:
+---
+
+## 8. Docker Containerization, AWS Credentials & Production Deployment
+
+The project provides two tailored deployment configurations:
+1. **Local Development:** [`docker-compose.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.yml) (maps all service ports, mounts local `~/.aws` profile).
+2. **Production Single-Host EC2:** [`docker-compose.prod.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.prod.yml) (exposes only Port 80, uses EC2 IAM Role, keeps all internal services private).
+
 ```bash
+# Local development:
 docker compose up -d
+
+# Production EC2 deployment:
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-### Key Engineering Optimizations:
-1. **Pre-Built Multi-Module JAR Pattern**:
+### Key Engineering & Security Optimizations:
+1. **Single Public Port (Port 80) & Same-Origin Nginx Reverse Proxy**:
+   - In production, only the `frontend` container publishes port `80:80` to the host.
+   - Nginx serves the React single-page application and transparently reverse-proxies all `/api/*` traffic to `http://api-gateway:8088/api/*` inside the private bridge network.
+   - Eliminates CORS issues across all client browsers and keeps Eureka, API Gateway, and all 4 microservices completely hidden from the public internet.
+   - Configured with `client_max_body_size 10M;` and gzip compression to support up to 5 MB S3 image uploads.
+2. **EC2 IAM Role Authentication (`NutritionTrackerEC2Role`)**:
+   - The production container for `food-database-service` has **zero static AWS credentials** and **no mounted credential files**.
+   - The AWS SDK v2 `DefaultCredentialsProvider` queries the EC2 Instance Metadata Service (IMDSv2) at `169.254.169.254` to automatically fetch temporary STS credentials for the attached **`NutritionTrackerEC2Role`**.
+3. **Pre-Built Multi-Module JAR Pattern**:
    - Rather than executing 6 independent heavy Maven builds inside Docker, the root aggregator [pom.xml](file:///c:/Riten/Java/nutrition-tracker-msa/pom.xml) compiles all modules on the host in ~40 seconds.
    - Lightweight Dockerfiles copy pre-compiled JARs into `eclipse-temurin:21-jre-alpine` containers, producing tiny image footprints and rapid startup.
-2. **JVM Memory Tuning for Low-RAM Machines**:
-   - To comfortably run 8 full containers on systems with limited RAM, each JVM is tuned with serial garbage collection and explicit heap caps:
+4. **JVM Memory Tuning for Low-RAM EC2 Instances**:
+   - To comfortably run all microservices on a single cost-effective instance (e.g. `t3.small` / `t3.medium`), each JVM is tuned with serial garbage collection and explicit heap caps:
      ```yaml
      JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
      ```
    - Total memory footprint for all 5 Spring Boot services combined is under **1.2 GB**!
-3. **Container Healthcheck Ordering**:
+5. **Container Healthcheck Ordering**:
    - Dependent microservices wait for `eureka-server` to become **healthy** (`test: curl -f http://localhost:8761/`) before starting, preventing startup registration race conditions.
 
 ---

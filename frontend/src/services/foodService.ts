@@ -34,4 +34,20 @@ export const foodService = {
     const response = await api.get<NutritionDto>(`/api/foods/${foodId}/nutrition`);
     return response.data;
   },
+
+  async uploadFoodImage(foodId: string, file: File): Promise<FoodResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post<FoodResponse>(`/api/foods/${foodId}/image`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  async deleteFoodImage(foodId: string): Promise<FoodResponse> {
+    const response = await api.delete<FoodResponse>(`/api/foods/${foodId}/image`);
+    return response.data;
+  },
 };
