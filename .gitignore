@@ -35,3 +35,8 @@ logs/
 **/*.env
 *.pem
 *.key
+
+# Submission artifacts
+A041_Project/
+*.zip
+build_submission.py
