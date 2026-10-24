@@ -2,7 +2,7 @@
 
 > **System Deep-Dive & Service Specification**  
 > **Platform Stack:** Java 21 • Spring Boot 3.3.x • Spring Cloud 2023.0.3 (Eureka, Gateway, OpenFeign) • Amazon S3 (AWS SDK for Java v2) • MongoDB NoSQL • React 19 + Vite • Docker Compose (Local & EC2 Production)  
-> **Official Repository:** [nutrition-tracker-micro-service](https://github.com/Riten13/nutrition-tracker-micro-service.git) • **Branch:** `main`  
+> **Official Repository:** [nutrition-tracker-msa](https://github.com/Riten13/nutrition-tracker-msa.git) • **Branch:** `main`  
 > **Production Target:** AWS EC2 (Ubuntu 24.04 LTS, `c7i-flex.large`, 4 GB RAM, Region `ap-southeast-2`)
 
 ---
@@ -560,7 +560,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 - **Instance Type:** `c7i-flex.large` (2 vCPU, 4.0 GB RAM)
 - **Operating System:** Ubuntu 24.04 LTS (`noble`)
 - **Container Runtimes:** Docker Engine `29.1.3` + Docker Compose plugin `2.40.3`
-- **Official Repository:** [`https://github.com/Riten13/nutrition-tracker-micro-service.git`](https://github.com/Riten13/nutrition-tracker-micro-service.git)
+- **Official Repository:** [`https://github.com/Riten13/nutrition-tracker-msa.git`](https://github.com/Riten13/nutrition-tracker-msa.git)
 - **Deployment Operations Manual:** Full step-by-step setup guide is in [`DEPLOY_EC2.md`](file:///c:/Riten/Java/nutrition-tracker-msa/DEPLOY_EC2.md).
 
 ### Key Engineering & Security Optimizations:

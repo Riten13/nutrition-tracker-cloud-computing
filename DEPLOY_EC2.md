@@ -190,7 +190,7 @@ mvn -version
 ### Step 3: Clone Codebase & Configure Environment
 ```bash
 # Clone the repository
-git clone https://github.com/Riten13/nutrition-tracker-micro-service.git nutrition-tracker-msa
+git clone https://github.com/Riten13/nutrition-tracker-msa.git nutrition-tracker-msa
 cd nutrition-tracker-msa
 
 # Create production .env file
