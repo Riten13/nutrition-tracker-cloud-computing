@@ -1,7 +1,9 @@
 # 🥗 Nutrition Tracker — Comprehensive Microservices Architecture Guide
 
 > **System Deep-Dive & Service Specification**  
-> **Platform Stack:** Java 21 • Spring Boot 3.3.x • Spring Cloud 2023.0.3 (Eureka, Gateway, OpenFeign) • Amazon S3 (AWS SDK for Java v2) • MongoDB NoSQL • React 19 + Vite • Docker Compose
+> **Platform Stack:** Java 21 • Spring Boot 3.3.x • Spring Cloud 2023.0.3 (Eureka, Gateway, OpenFeign) • Amazon S3 (AWS SDK for Java v2) • MongoDB NoSQL • React 19 + Vite • Docker Compose (Local & EC2 Production)  
+> **Official Repository:** [nutrition-tracker-micro-service](https://github.com/Riten13/nutrition-tracker-micro-service.git) • **Branch:** `main`  
+> **Production Target:** AWS EC2 (Ubuntu 24.04 LTS, `c7i-flex.large`, 4 GB RAM, Region `ap-southeast-2`)
 
 ---
 
@@ -411,8 +413,10 @@ Allows users to maintain active grocery shopping lists, tick off purchased items
 - **`GroceryPlanning.tsx`**:
   - Interactive checklist with real-time bill calculations and item check-offs.
 - **API Service Layer (`/src/services`)**:
-  - Centralized Axios client (`api.ts`) configured with `VITE_API_BASE_URL=http://localhost:8088`.
-  - Automatically attaches `Authorization: Bearer <token>` from `localStorage` on every outbound request.
+  - Centralized Axios client ([api.ts](file:///c:/Riten/Java/nutrition-tracker-msa/frontend/src/services/api.ts)) with environment-aware `baseURL` resolution:
+    - **Local Development:** Defaults to `http://localhost:8088` when running Vite dev server locally.
+    - **Production (EC2):** Resolves to same-origin relative URLs (`/api/...`) via `VITE_API_BASE_URL=""`, seamlessly proxied by Nginx to `http://api-gateway:8088/api/*` internally, completely avoiding CORS and keeping internal microservices and Eureka private.
+  - Automatically attaches `Authorization: Bearer <token>` from `localStorage` on outbound requests.
   - Redirects to `/login` upon receiving `401 Unauthorized` responses.
 
 ---
@@ -539,35 +543,58 @@ The entire ecosystem operates on a **pure MongoDB NoSQL architecture**:
 ## 8. Docker Containerization, AWS Credentials & Production Deployment
 
 The project provides two tailored deployment configurations:
-1. **Local Development:** [`docker-compose.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.yml) (maps all service ports, mounts local `~/.aws` profile).
-2. **Production Single-Host EC2:** [`docker-compose.prod.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.prod.yml) (exposes only Port 80, uses EC2 IAM Role, keeps all internal services private).
+1. **Local Development:** [`docker-compose.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.yml) (maps all service ports to host, mounts host `${USERPROFILE}/.aws` profile `nutrition-dev`).
+2. **Production Single-Host EC2:** [`docker-compose.prod.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.prod.yml) (exposes only Port 80 publicly, leverages EC2 IAM Instance Role, applies container memory limits for 4 GB RAM, and keeps all internal microservices private).
 
 ```bash
-# Local development:
+# Local development workflow:
 docker compose up -d
 
-# Production EC2 deployment:
+# Production EC2 deployment workflow:
+mvn clean package -DskipTests
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+### Verified Production Environment:
+- **Cloud Provider & Region:** AWS EC2 in `ap-southeast-2` (Asia Pacific - Sydney)
+- **Instance Type:** `c7i-flex.large` (2 vCPU, 4.0 GB RAM)
+- **Operating System:** Ubuntu 24.04 LTS (`noble`)
+- **Container Runtimes:** Docker Engine `29.1.3` + Docker Compose plugin `2.40.3`
+- **Official Repository:** [`https://github.com/Riten13/nutrition-tracker-micro-service.git`](https://github.com/Riten13/nutrition-tracker-micro-service.git)
+- **Deployment Operations Manual:** Full step-by-step setup guide is in [`DEPLOY_EC2.md`](file:///c:/Riten/Java/nutrition-tracker-msa/DEPLOY_EC2.md).
+
 ### Key Engineering & Security Optimizations:
 1. **Single Public Port (Port 80) & Same-Origin Nginx Reverse Proxy**:
-   - In production, only the `frontend` container publishes port `80:80` to the host.
-   - Nginx serves the React single-page application and transparently reverse-proxies all `/api/*` traffic to `http://api-gateway:8088/api/*` inside the private bridge network.
-   - Eliminates CORS issues across all client browsers and keeps Eureka, API Gateway, and all 4 microservices completely hidden from the public internet.
-   - Configured with `client_max_body_size 10M;` and gzip compression to support up to 5 MB S3 image uploads.
-2. **EC2 IAM Role Authentication (`NutritionTrackerEC2Role`)**:
+   - In production, **only** the `frontend` container binds port `80:80` to the EC2 host.
+   - Nginx serves the compiled React single-page application and transparently reverse-proxies all `/api/*` traffic to `http://api-gateway:8088/api/*` inside the private Docker bridge network (`nutrition-network`).
+   - Eliminates CORS issues across all client browsers and keeps Eureka (8761), API Gateway (8088), User Profile (8080), Food DB (3000), Meal Planning (3001), and Grocery Planning (3002) unexposed to the public internet.
+   - Configured with `client_max_body_size 10M;` and gzip compression to effortlessly support up to 5 MB S3 image uploads.
+2. **EC2 IAM Role Authentication (`NutritionTrackerEC2Role`) & IMDSv2 Hop Limit**:
    - The production container for `food-database-service` has **zero static AWS credentials** and **no mounted credential files**.
    - The AWS SDK v2 `DefaultCredentialsProvider` queries the EC2 Instance Metadata Service (IMDSv2) at `169.254.169.254` to automatically fetch temporary STS credentials for the attached **`NutritionTrackerEC2Role`**.
-3. **Pre-Built Multi-Module JAR Pattern**:
-   - Rather than executing 6 independent heavy Maven builds inside Docker, the root aggregator [pom.xml](file:///c:/Riten/Java/nutrition-tracker-msa/pom.xml) compiles all modules on the host in ~40 seconds.
-   - Lightweight Dockerfiles copy pre-compiled JARs into `eclipse-temurin:21-jre-alpine` containers, producing tiny image footprints and rapid startup.
-4. **JVM Memory Tuning for Low-RAM EC2 Instances**:
-   - To comfortably run all microservices on a single cost-effective instance (e.g. `t3.small` / `t3.medium`), each JVM is tuned with serial garbage collection and explicit heap caps:
-     ```yaml
-     JAVA_TOOL_OPTIONS: "-XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=128m -Xms64m -Xmx256m"
+   - **Crucial IMDSv2 Hop Limit**: Because containers run on a Docker bridge network (1 network hop from the host), the default IMDSv2 hop limit of 1 causes container credential requests to time out. Setting the hop limit to 2 allows containers to reach IMDSv2:
+     ```bash
+     aws ec2 modify-instance-metadata-options \
+       --instance-id <YOUR_EC2_INSTANCE_ID> \
+       --http-put-response-hop-limit 2 \
+       --http-endpoint enabled \
+       --region ap-southeast-2
      ```
-   - Total memory footprint for all 5 Spring Boot services combined is under **1.2 GB**!
+3. **Container Resource Limits & JVM Memory Tuning (4 GB RAM Budget)**:
+   - To guarantee stability without host OOM-killer crashes on a 4 GB RAM instance, each service in [`docker-compose.prod.yml`](file:///c:/Riten/Java/nutrition-tracker-msa/docker-compose.prod.yml) is allocated strict Docker resource limits and JVM memory flags:
+     | Container | JVM Options | Docker `mem_limit` | Docker `mem_reservation` | CPU Limit |
+     |:---|:---|:---:|:---:|:---:|
+     | `eureka-server` | `-Xms64m -Xmx256m -XX:+UseSerialGC` | 512 MB | 256 MB | 0.50 |
+     | `api-gateway` | `-Xms64m -Xmx256m -XX:+UseSerialGC` | 512 MB | 256 MB | 0.75 |
+     | `user-profile-service` | `-Xms64m -Xmx256m -XX:+UseSerialGC` | 640 MB | 384 MB | 0.75 |
+     | `food-database-service` | `-Xms64m -Xmx256m -XX:+UseSerialGC` | 640 MB | 384 MB | 0.75 |
+     | `meal-planning-service` | `-Xms64m -Xmx256m -XX:+UseSerialGC` | 640 MB | 384 MB | 0.75 |
+     | `grocery-planning-service` | `-Xms64m -Xmx256m -XX:+UseSerialGC` | 512 MB | 256 MB | 0.50 |
+     | `frontend` (Nginx) | N/A (Static + Reverse Proxy) | 128 MB | 64 MB | 0.25 |
+   - Total peak container consumption is safely bounded to **~3.5 GB**, leaving ample headroom for the Ubuntu OS kernel and Docker daemon.
+4. **Pre-Built Multi-Module JAR Pattern**:
+   - Rather than executing 6 independent heavy Maven builds inside Docker, the root aggregator [pom.xml](file:///c:/Riten/Java/nutrition-tracker-msa/pom.xml) compiles all modules on the host (`mvn clean package -DskipTests`) in ~40 seconds.
+   - Lightweight Dockerfiles copy pre-compiled JARs into `eclipse-temurin:21-jre-alpine` containers, producing tiny image footprints and rapid startup.
 5. **Container Healthcheck Ordering**:
    - Dependent microservices wait for `eureka-server` to become **healthy** (`test: curl -f http://localhost:8761/`) before starting, preventing startup registration race conditions.
 
