@@ -37,6 +37,8 @@ logs/
 *.key
 
 # Submission artifacts
+A0*_Project/
 A041_Project/
+A046_Project/
 *.zip
 build_submission.py
